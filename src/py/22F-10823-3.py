@@ -59,19 +59,19 @@ def read_exp(idx):
     )
 
     coor_df = coor_df.reindex(index=count_df.index)
-    coor_df = coor_df[["pxl_row_in_fullres", "pxl_col_in_fullres"]]
+    coor_df = coor_df[["pxl_col_in_fullres", "pxl_row_in_fullres"]]
 
     d = sb.STDataset(count_df, coor_df)
     d = sb.filters.low_variance_filter(d)
-    d = sb.filters.high_expression_filter(d)
-    # d = sb.normalizers.logcpm_normalizer(d)
+    # d = sb.filters.high_expression_filter(d)
+    d = sb.normalizers.logcpm_normalizer(d)
     return d
 
 
 # %%
 idx = "22F-10823-3"
 d = read_exp(idx)
-sb.run(d, cores=5, n_svgs=500, n_svg_clusters=2)
+sb.run(d, cores=5)
 
 d.hotspot_df.T.to_csv(
     Path.joinpath(WORKDIR, "Data", "scale_df", "hotspot", f"{idx}.csv"))
@@ -80,57 +80,36 @@ d.AI.sort_values(ascending=False).to_csv(
 d.svg_cluster.to_csv(
     Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}-svg-cluster.csv"))
 sb.plot.svg_heatmap(
-    d, Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}-heatmap.svg"))
+    d, Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}-heatmap.svg"),
+    he_path)
 sb.plot.spot_type_map(
-    d, Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}-typemap.svg"))
+    d, Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}-typemap.svg"),
+    he_path)
 
 with open(Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}.pickle"),
           "wb") as f:
     pickle.dump(d, f)
 
 # %%
-if True:
-    idx = "22F-10823-3"
-    with open(Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}.pickle"),
-              "rb") as f:
-        d = pickle.load(f)
+idx = "22F-10823-3"
+with open(Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}.pickle"),
+          "rb") as f:
+    d = pickle.load(f)
 
 # %%
 selected_genes = [
-    "CDC27", "DBF4", "ANAPC4", "STAG2", "RBL2", "TTK", "ORC2", "ORC4", "CCNH",
-    "ORC3", "RB1", "CCNA2", "BUB1B", "RAD21", "ORC5", "BUB1", "CDK1", "HDAC2"
+    "CD34", "CHKA", "EGFR", "ETFA", "GFAP", "IDH1", "MKI67", "MLH1", "MSH2",
+    "MSH6", "MUC1", "NF1", "NF2", "NTRK2", "NTRK3", "OLIG2", "PDGFRA", "PMS2",
+    "S100A1", "S100A4", "S100A6", "S100A8", "S100A9", "S100A10", "S100A11",
+    "S100A13", "S100A16", "S100B", "S100PBP", "SMARCB1", "TP53", "VIM"
 ]
 selected_genes = set(selected_genes + list(d.AI.sort_values()[-500:].index))
 
 gene_pairs = sb.find_combinations(
     d,
-    center_spots=2,
+    center_spots=5,
     selected_genes=selected_genes,
     use_neighbor=False,
 )
 gene_pairs.to_csv(
     Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}-gene_pairs.csv"))
-
-# %%
-colors = [
-    "tab:green", "tab:blue", "tab:orange", "tab:pink", "tab:cyan",
-]
-save_path = Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}-CD58&CDK1.svg")
-sb.core.plot._hotspot_colocalization_map(
-    d.hotspot_df,
-    d.coordinate_df[["Y", "X"]],
-    ("CD58", "CDK1"),
-    save_path,
-    he_path,
-    colors=colors,
-)
-
-save_path = Path.joinpath(WORKDIR, "results", "svgbit", f"{idx}-CD58&CDC25C.svg")
-sb.core.plot._hotspot_colocalization_map(
-    d.hotspot_df,
-    d.coordinate_df[["Y", "X"]],
-    ("CD58", "CDC25C"),
-    save_path,
-    he_path,
-    colors=colors,
-)

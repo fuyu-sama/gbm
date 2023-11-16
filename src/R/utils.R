@@ -1,5 +1,6 @@
 suppressPackageStartupMessages({
     library(rlang)
+    library(patchwork)
 })
 
 DoMultiBarHeatmap <- function (object,

@@ -48,14 +48,11 @@ WORKDIR <- fs::path(Sys.getenv("HOME"), "workspace", "gbm")
 idx.full <- c("21B-603-5", "22F-10823-3", "22F-21576-1", "22F-23738-2")
 idx.list <- as.list(idx.full)
 names(idx.list) <- idx.full
+source(fs::path(WORKDIR, "src", "R", "utils.R"))
 
 save.dirs <- lapply(
     idx.list,
-    function(idx) {
-        save.dir <- fs::path(WORKDIR, "results", idx)
-        if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-        return(save.dir)
-    }
+    function(idx) save.dir <- fs::path(WORKDIR, "results", idx)
 )
 save.dirs[["int"]] <- fs::path(WORKDIR, "results", "integrate")
 if (! fs::dir_exists(save.dirs[["int"]])) fs::dir_create(save.dirs[["int"]])
@@ -79,10 +76,8 @@ loadIntegrate <- function() {
     integrate.obj <<- readRDS(fs::path(WORKDIR, "results", "integrate.rds"))
 }
 
-# %% load Seurat list
-loadSeuratList()
-
 # %% integrate data
+loadSeuratList()
 integrateData <- function(seurat.list) {
     cons <- list(
         "21B-603-5" = "IV",
@@ -140,16 +135,330 @@ integrateData <- function(seurat.list) {
     integrate.obj <- RunTSNE(
         integrate.obj, reduction = "pca", dims = 1:30, verbose = FALSE)
 
-    p1 <- DimPlot(integrate.obj, reduction = "tsne", cols = DiscretePalette(13))
-    p2 <- DimPlot(integrate.obj, reduction = "tsne", group.by = "sample")
-    ggsave(fs::path(save.dirs[["int"]], "integrate.tsne.pdf"), p1 + p2, width = 20)
-
     return(integrate.obj)
 }
 integrate.obj <- integrateData(seurat.list)
 
+# %% annotation
+regionAnnotation <- function(seurat.obj) {
+    region.annotations <- list(
+        "21B-603-5.4" = "Blood vessel rich area",
+        "22F-10823-3.2" = "Blood vessel rich area",
+        "22F-21576-1.0" = "Blood vessel rich area",
+        "22F-23738-2.2" = "Blood vessel rich area",
+        "21B-603-5.2" = "Tumor cell densely populated area",
+        "22F-10823-3.0" = "Tumor cell densely populated area",
+        "22F-21576-1.2" = "Tumor cell densely populated area",
+        "22F-23738-2.0" = "Tumor cell densely populated area",
+        "21B-603-5.0" = "Tumor area 1",
+        "22F-10823-3.5" = "Tumor area 2",
+        "22F-21576-1.3" = "Tumor area 3",
+        "22F-21576-1.1" = "Tumor area 4",
+        "22F-23738-2.1" = "Tumor area 5",
+        "22F-23738-2.4" = "Tumor area 6",
+        "22F-23738-2.3" = "Tumor area 7",
+        "22F-23738-2.5" = "Tumor area 8",
+        "21B-603-5.1" = "Junction area",
+        "22F-10823-3.1" = "Junction area",
+        "22F-10823-3.3" = "Junction area 2",
+        "21B-603-5.3" = "Parancerous area",
+        "22F-10823-3.4" = "Parancerous area"
+    )
+    Idents(seurat.obj) <- paste(
+        seurat.obj@meta.data$sample, Idents(seurat.obj), sep = ".")
+    seurat.obj <- RenameIdents(seurat.obj, region.annotations)
+    p <- SpatialDimPlot(seurat.obj, label.size = 3, alpha = 0.6, label = TRUE)
+    save.path <- fs::path(save.dirs[["int"]], "分区.pdf")
+    ggsave(save.path, p, width = 28, height = 7)
+
+    p1 <- DimPlot(
+        seurat.obj,
+        reduction = "tsne",
+        cols = DiscretePalette(length(region.annotations))
+    )
+    p2 <- DimPlot(seurat.obj, reduction = "tsne", group.by = "sample")
+    ggsave(fs::path(save.dirs[["int"]], "integrate.tsne.pdf"), p1 + p2, width = 20)
+    return(seurat.obj)
+}
+integrate.obj <- regionAnnotation(integrate.obj)
+
 # %% integrate de 1
-differentialExpressionInt1 <- function(compare.ident) {
+differentialExpressionInt1 <- function(seurat.obj) {
+    markers <- FindAllMarkers(
+        seurat.obj, logfc.threshold = 0.1, verbose = FALSE
+    )
+    save.path <- fs::path(save.dirs[["int"]], "整合分区域差异表达.csv")
+    write.csv(markers, save.path)
+
+    tops <- markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+    p <- DoHeatmap(seurat.obj, features = tops$gene) + NoLegend()
+    save.path <- fs::path(save.dirs[["int"]], "整合分区域差异表达热图.pdf")
+    ggsave(save.path, p, height = 30, width = 15)
+
+    return(markers)
+}
+markers.list1 <- differentialExpressionInt1(integrate.obj)
+
+# %% enrichment 1
+enrichmentInt1 <- function() {
+    clusters <- unique(markers.list1$cluster)
+    for (cluster in clusters) {
+        upscale.table <- markers.list1 %>%
+            group_by(cluster) %>%
+            filter(p_val_adj < 0.05, avg_log2FC > 0)
+        downscale.table <- markers.list1 %>%
+            group_by(cluster) %>%
+            filter(p_val_adj < 0.05, avg_log2FC < 0)
+        upscale.genes <- upscale.table[upscale.table$cluster == cluster, ]$gene
+        upscale.genes <- upscale.genes[!grepl("^DEPRECATED-", upscale.genes)]
+        downscale.genes <- downscale.table[downscale.table$cluster == cluster, ]$gene
+        downscale.genes <- downscale.genes[!grepl("^DEPRECATED-", downscale.genes)]
+
+        save.dir <- fs::path(save.dirs[["int"]], "GO")
+        if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+        upscale.ego <- enrichGO(
+            upscale.genes,
+            OrgDb = OrgDb,
+            keyType = "SYMBOL",
+            ont = "ALL",
+            pvalueCutoff = 0.05,
+            pAdjustMethod = "BH",
+            qvalueCutoff = 0.1
+        )
+        downscale.ego <- enrichGO(
+            downscale.genes,
+            OrgDb = OrgDb,
+            keyType = "SYMBOL",
+            ont = "ALL",
+            pvalueCutoff = 0.05,
+            pAdjustMethod = "BH",
+            qvalueCutoff = 0.1
+        )
+        p1 <- dotplot(upscale.ego, split = "ONTOLOGY") +
+            facet_grid(ONTOLOGY~., scale = "free") +
+            ggtitle("GO Enrichment for log2FC > 0 genes")
+        p2 <- dotplot(downscale.ego, split = "ONTOLOGY") +
+            facet_grid(ONTOLOGY~., scale = "free") +
+            ggtitle("GO Enrichment for log2FC < 0 genes")
+        cluster <- stringr::str_replace_all(cluster, " ", "_")
+        ggsave(
+            fs::path(save.dir, paste(cluster, "GO.pdf", sep = ".")),
+            p1 + p2,
+            width = 14,
+            height = 15
+        )
+        write.xlsx2(
+            as.data.frame(upscale.ego),
+            fs::path(save.dir, paste(cluster, "GO.xlsx", sep = ".")),
+            sheetName = "avg_log2FC > 0"
+        )
+        write.xlsx2(
+            as.data.frame(downscale.ego),
+            fs::path(save.dir, paste(cluster, "GO.xlsx", sep = ".")),
+            sheetName = "avg_log2FC < 0",
+            append = TRUE
+        )
+
+        save.dir <- fs::path(save.dirs[["int"]], "KEGG")
+        if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+        upscale.ids <- mapIds(
+            OrgDb, keys = upscale.genes, column = "ENTREZID", keytype = "SYMBOL")
+        downscale.ids <- mapIds(
+            OrgDb, keys = downscale.genes, column = "ENTREZID", keytype = "SYMBOL")
+        upscale.kk <- enrichKEGG(
+            upscale.ids,
+            organism = "hsa",
+            keyType = "ncbi-geneid",
+            pvalueCutoff = 0.05,
+            pAdjustMethod = "BH",
+            qvalueCutoff = 0.1
+        )
+        downscale.kk <- enrichKEGG(
+            downscale.ids,
+            organism = "hsa",
+            keyType = "ncbi-geneid",
+            pvalueCutoff = 0.05,
+            pAdjustMethod = "BH",
+            qvalueCutoff = 0.1
+        )
+        if (dim(upscale.kk)[1] > 0) {
+            p1 <- dotplot(upscale.kk) +
+                ggtitle("KEGG Enrichment for log2FC > 0 genes")
+            write.xlsx2(
+                as.data.frame(upscale.kk),
+                fs::path(save.dir, paste(cluster, "KEGG.xlsx", sep = ".")),
+                sheetName = "avg_log2FC > 0"
+            )
+        } else {
+            p1 <- NULL
+        }
+        if (dim(downscale.kk)[1] > 0) {
+            p2 <- dotplot(downscale.kk) +
+                ggtitle("KEGG Enrichment for log2FC < 0 genes")
+            write.xlsx2(
+                as.data.frame(downscale.kk),
+                fs::path(save.dir, paste(cluster, "KEGG.xlsx", sep = ".")),
+                sheetName = "avg_log2FC < 0",
+                append = TRUE
+            )
+        } else {
+            p2 <- NULL
+        }
+        ggsave(
+            fs::path(save.dir, paste(cluster, "KEGG.pdf", sep = ".")),
+            p1 + p2,
+            width = 14
+        )
+    }
+}
+enrichmentInt1()
+
+# %% integrate de 2 tumor vs. para
+differentialExpressionInt2 <- function(seurat.obj) {
+    ident.1 <- c(
+        "Blood vessel rich area",
+        "Tumor cell densely populated area",
+        "Tumor area 1",
+        "Tumor area 2",
+        "Tumor area 3",
+        "Tumor area 4",
+        "Tumor area 5",
+        "Tumor area 6",
+        "Tumor area 7",
+        "Tumor area 8"
+    )
+    markers <- FindMarkers(
+        seurat.obj,
+        ident.1 = ident.1,
+        ident.2 = c("Junction area", "Junction area 2", "Parancerous area"),
+        logfc.threshold = 0.1,
+        verbose = FALSE
+    )
+    save.dir <- fs::path(save.dirs[["int"]], "肿瘤vs瘤旁")
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    save.path <- fs::path(save.dir, "差异表达.csv")
+    write.csv(markers, save.path)
+
+    tops <- markers %>% top_n(n = 50, wt = avg_log2FC) %>% rownames()
+    bottoms <- markers %>% top_n(n = -50, wt = avg_log2FC) %>% rownames()
+    p <- DoHeatmap(seurat.obj, features = c(tops, bottoms)) + NoLegend()
+    save.path <- fs::path(save.dir, "差异表达热图.pdf")
+    ggsave(save.path, p, height = 20, width = 15)
+
+    return(markers)
+}
+markers.list2 <- differentialExpressionInt2(integrate.obj)
+
+# %% entichment 2
+enrichmentInt2 <- function() {
+    upscale.table <- markers.list1 %>%
+        filter(p_val_adj < 0.05, avg_log2FC > 0)
+    downscale.table <- markers.list1 %>%
+        filter(p_val_adj < 0.05, avg_log2FC < 0)
+    upscale.genes <- rownames(upscale.table)
+    upscale.genes <- upscale.genes[!grepl("^DEPRECATED-", upscale.genes)]
+    downscale.genes <- rownames(downscale.table)
+    downscale.genes <- downscale.genes[!grepl("^DEPRECATED-", downscale.genes)]
+
+    save.dir <- fs::path(save.dirs[["int"]], "肿瘤vs瘤旁", "GO")
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    upscale.ego <- enrichGO(
+        upscale.genes,
+        OrgDb = OrgDb,
+        keyType = "SYMBOL",
+        ont = "ALL",
+        pvalueCutoff = 0.05,
+        pAdjustMethod = "BH",
+        qvalueCutoff = 0.1
+    )
+    downscale.ego <- enrichGO(
+        downscale.genes,
+        OrgDb = OrgDb,
+        keyType = "SYMBOL",
+        ont = "ALL",
+        pvalueCutoff = 0.05,
+        pAdjustMethod = "BH",
+        qvalueCutoff = 0.1
+    )
+    p1 <- dotplot(upscale.ego, split = "ONTOLOGY") +
+        facet_grid(ONTOLOGY~., scale = "free") +
+        ggtitle("GO Enrichment for log2FC > 0 genes")
+    p2 <- dotplot(downscale.ego, split = "ONTOLOGY") +
+        facet_grid(ONTOLOGY~., scale = "free") +
+        ggtitle("GO Enrichment for log2FC < 0 genes")
+    ggsave(
+        fs::path(save.dir, "GO.pdf"),
+        p1 + p2,
+        width = 14,
+        height = 15
+    )
+    write.xlsx2(
+        as.data.frame(upscale.ego),
+        fs::path(save.dir, "GO.xlsx"),
+        sheetName = "avg_log2FC > 0"
+    )
+    write.xlsx2(
+        as.data.frame(downscale.ego),
+        fs::path(save.dir, "GO.xlsx"),
+        sheetName = "avg_log2FC < 0",
+        append = TRUE
+    )
+
+    save.dir <- fs::path(save.dirs[["int"]], "肿瘤vs瘤旁", "KEGG")
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    upscale.ids <- mapIds(
+        OrgDb, keys = upscale.genes, column = "ENTREZID", keytype = "SYMBOL")
+    downscale.ids <- mapIds(
+        OrgDb, keys = downscale.genes, column = "ENTREZID", keytype = "SYMBOL")
+    upscale.kk <- enrichKEGG(
+        upscale.ids,
+        organism = "hsa",
+        keyType = "ncbi-geneid",
+        pvalueCutoff = 0.05,
+        pAdjustMethod = "BH",
+        qvalueCutoff = 0.1
+    )
+    downscale.kk <- enrichKEGG(
+        downscale.ids,
+        organism = "hsa",
+        keyType = "ncbi-geneid",
+        pvalueCutoff = 0.05,
+        pAdjustMethod = "BH",
+        qvalueCutoff = 0.1
+    )
+    if (dim(upscale.kk)[1] > 0) {
+        p1 <- dotplot(upscale.kk) +
+            ggtitle("KEGG Enrichment for log2FC > 0 genes")
+        write.xlsx2(
+            as.data.frame(upscale.kk),
+            fs::path(save.dir, "KEGG.xlsx"),
+            sheetName = "avg_log2FC > 0"
+        )
+    } else {
+        p1 <- NULL
+    }
+    if (dim(downscale.kk)[1] > 0) {
+        p2 <- dotplot(downscale.kk) +
+            ggtitle("KEGG Enrichment for log2FC < 0 genes")
+        write.xlsx2(
+            as.data.frame(downscale.kk),
+            fs::path(save.dir, "KEGG.xlsx"),
+            sheetName = "avg_log2FC < 0",
+            append = TRUE
+        )
+    } else {
+        p2 <- NULL
+    }
+    ggsave(
+        fs::path(save.dir, "KEGG.pdf"),
+        p1 + p2,
+        width = 14
+    )
+}
+enrichmentInt2()
+
+# %% integrate de 3 IV vs GBM
+differentialExpressionInt3 <- function(compare.ident) {
     subset.obj <- integrate.obj
     names(subset.obj@images) <- NULL
     subset.obj <- subset(subset.obj, idents = compare.ident)
@@ -164,8 +473,8 @@ differentialExpressionInt1 <- function(compare.ident) {
         verbose = FALSE
     )
     compare.ident <- stringr::str_replace_all(compare.ident, " ", "_")
-    file.name <- paste(compare.ident, "IV.vs.GBM", sep = ".")
-    save.dir <- fs::path(save.dirs[["int"]], "iv-vs-gbm")
+    file.name <- paste(compare.ident, "四级.vs.GBM", sep = ".")
+    save.dir <- fs::path(save.dirs[["int"]], "四级-vs-gbm")
     if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
     save.path <- fs::path(save.dir, paste0(file.name, ".csv"))
     write.csv(markers, save.path)
@@ -186,13 +495,13 @@ named.regions <- list(
     "Tumor cell densely populated area" = "Tumor cell densely populated area",
     "Blood vessel rich area" = "Blood vessel rich area"
 )
-integrate.markers1 <- mclapply(named.regions, differentialExpressionInt1)
+integrate.markers3 <- mclapply(named.regions, differentialExpressionInt3)
 
-# %% enrichment for integrate 1
-enrichmentInt1 <- function(region) {
-    upscale.table <- integrate.markers1[[region]] %>%
+# %% enrichment for integrate 3
+enrichmentInt3 <- function(region) {
+    upscale.table <- integrate.markers3[[region]] %>%
         filter(p_val_adj < 0.05, avg_log2FC > 0)
-    downscale.table <- integrate.markers1[[region]] %>%
+    downscale.table <- integrate.markers3[[region]] %>%
         filter(p_val_adj < 0.05, avg_log2FC < 0)
     upscale.genes <- rownames(upscale.table)
     upscale.genes <- upscale.genes[!grepl("^DEPRECATED-", upscale.genes)]
@@ -204,7 +513,8 @@ enrichmentInt1 <- function(region) {
     }
 
     region <- stringr::str_replace_all(region, " ", "_")
-    save.dir <- fs::path(save.dirs[["int"]], "iv-vs-gbm")
+    save.dir <- fs::path(save.dirs[["int"]], "四级-vs-GBM", "GO")
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
 
     upscale.ego <- enrichGO(
         upscale.genes,
@@ -248,6 +558,8 @@ enrichmentInt1 <- function(region) {
         append = TRUE
     )
 
+    save.dir <- fs::path(save.dirs[["int"]], "四级-vs-GBM", "KEGG")
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
     upscale.ids <- mapIds(
         OrgDb, keys = upscale.genes, column = "ENTREZID", keytype = "SYMBOL")
     downscale.ids <- mapIds(
@@ -289,10 +601,10 @@ enrichmentInt1 <- function(region) {
         append = TRUE
     )
 }
-sapply(names(integrate.markers1), enrichmentInt1)
+sapply(names(integrate.markers3), enrichmentInt3)
 
-# %% integrate de 2
-differentialExpressionInt2 <- function(compare.ident) {
+# %% integrate de 4
+differentialExpressionInt4 <- function(compare.ident) {
     subset.obj <- integrate.obj
     names(subset.obj@images) <- NULL
     new.ident <- paste(subset.obj@meta.data$level, Idents(subset.obj), sep = ".")
@@ -308,7 +620,7 @@ differentialExpressionInt2 <- function(compare.ident) {
     )
     compare.ident <- stringr::str_replace_all(compare.ident, " ", "_")
     file.name <- paste(compare.ident, "vs.Parancerous_area", sep = ".")
-    save.dir <- fs::path(save.dirs[["int"]], "other-region-vs-parancerous")
+    save.dir <- fs::path(save.dirs[["int"]], "其他区域-vs-瘤旁")
     if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
     save.path <- fs::path(save.dir, paste0(file.name, ".csv"))
     write.csv(markers, save.path)
@@ -331,13 +643,13 @@ named.regions <- list(
     "GBM.Tumor cell densely populated area" = "GBM.Tumor cell densely populated area",
     "GBM.Blood vessel rich area" = "GBM.Blood vessel rich area"
 )
-integrate.markers2 <- mclapply(named.regions, differentialExpressionInt2)
+integrate.markers4 <- mclapply(named.regions, differentialExpressionInt4)
 
-# %% enrichment for integrate 2
-enrichmentInt2 <- function(region) {
-    upscale.table <- integrate.markers2[[region]] %>%
+# %% enrichment for integrate 4
+enrichmentInt4 <- function(region) {
+    upscale.table <- integrate.markers4[[region]] %>%
         filter(p_val_adj < 0.05, avg_log2FC > 0)
-    downscale.table <- integrate.markers2[[region]] %>%
+    downscale.table <- integrate.markers4[[region]] %>%
         filter(p_val_adj < 0.05, avg_log2FC < 0)
     upscale.genes <- rownames(upscale.table)
     upscale.genes <- upscale.genes[!grepl("^DEPRECATED-", upscale.genes)]
@@ -349,7 +661,7 @@ enrichmentInt2 <- function(region) {
     }
 
     region <- stringr::str_replace_all(region, " ", "_")
-    save.dir <- fs::path(save.dirs[["int"]], "other-region-vs-parancerous")
+    save.dir <- fs::path(save.dirs[["int"]], "其他区域-vs-瘤旁")
     file.name <- paste(region, "vs.Parancerous_area", sep = ".")
 
     upscale.ego <- enrichGO(
@@ -435,301 +747,4 @@ enrichmentInt2 <- function(region) {
         append = TRUE
     )
 }
-sapply(names(integrate.markers2), enrichmentInt2)
-
-# %% integrate de 3
-differentialExpressionInt3 <- function() {
-    subset.obj <- integrate.obj
-    names(subset.obj@images) <- NULL
-    idents <- Idents(subset.obj)
-    idents <- idents[! idents %in% c("Parancerous area", "Blood vessel rich area", "Tumor cell densely populated area", "Junction area")]
-    subset.obj <- subset(subset.obj, idents = idents)
-
-    markers <- FindMarkers(
-        subset.obj,
-        "IV",
-        "GBM",
-        group.by = "level",
-        logfc.threshold = 0.1,
-        verbose = FALSE
-    )
-    file.name <- "Tumor_cell_non-dense_area.IV.vs.GBM"
-    save.dir <- fs::path(save.dirs[["int"]], "tumor_cell_non-dense_area")
-    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-    save.path <- fs::path(save.dir, paste0(file.name, ".csv"))
-    write.csv(markers, save.path)
-
-    tops <- c(
-        rownames(top_n(markers, n = 20, wt = avg_log2FC)),
-        rownames(top_n(markers, n = -20, wt = avg_log2FC))
-    )
-    p <- DoHeatmap(subset.obj, features = tops, group.by = "level") + NoLegend()
-    save.path <- fs::path(save.dir, paste0(file.name, ".pdf"))
-    ggsave(save.path, p)
-
-    return(markers)
-}
-integrate.markers3 <- differentialExpressionInt3()
-
-# %% enrichment for integrate 3
-enrichmentInt3 <- function() {
-    upscale.table <- integrate.markers3 %>%
-        filter(p_val_adj < 0.05, avg_log2FC > 0)
-    downscale.table <- integrate.markers3 %>%
-        filter(p_val_adj < 0.05, avg_log2FC < 0)
-    upscale.genes <- rownames(upscale.table)
-    upscale.genes <- upscale.genes[!grepl("^DEPRECATED-", upscale.genes)]
-    downscale.genes <- rownames(downscale.table)
-    downscale.genes <- downscale.genes[!grepl("^DEPRECATED-", downscale.genes)]
-    if ((length(upscale.genes) <= 0) || (length(downscale.genes) <= 0)) {
-        print(region)
-        next
-    }
-
-    save.dir <- fs::path(save.dirs[["int"]], "tumor_cell_non-dense_area")
-    file.name <- "Tumor_cell_non-dense_area.IV.vs.GBM"
-
-    upscale.ego <- enrichGO(
-        upscale.genes,
-        OrgDb = OrgDb,
-        keyType = "SYMBOL",
-        ont = "ALL",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    downscale.ego <- enrichGO(
-        downscale.genes,
-        OrgDb = OrgDb,
-        keyType = "SYMBOL",
-        ont = "ALL",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    p1 <- dotplot(upscale.ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment for log2FC > 0 genes")
-    p2 <- dotplot(downscale.ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment for log2FC < 0 genes")
-    ggsave(
-        fs::path(save.dir, paste0(file.name, ".GO.pdf")),
-        p1 + p2,
-        width = 14,
-        height = 15
-    )
-    write.xlsx2(
-        as.data.frame(upscale.ego),
-        fs::path(save.dir, paste0(file.name, ".GO.xlsx")),
-        sheetName = "avg_log2FC > 0"
-    )
-    write.xlsx2(
-        as.data.frame(downscale.ego),
-        fs::path(save.dir, paste0(file.name, ".GO.xlsx")),
-        sheetName = "avg_log2FC < 0",
-        append = TRUE
-    )
-
-    upscale.ids <- mapIds(
-        OrgDb, keys = upscale.genes, column = "ENTREZID", keytype = "SYMBOL")
-    downscale.ids <- mapIds(
-        OrgDb, keys = downscale.genes, column = "ENTREZID", keytype = "SYMBOL")
-    upscale.kk <- enrichKEGG(
-        upscale.ids,
-        organism = "hsa",
-        keyType = "ncbi-geneid",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    downscale.kk <- enrichKEGG(
-        downscale.ids,
-        organism = "hsa",
-        keyType = "ncbi-geneid",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    p1 <- dotplot(upscale.kk) +
-        ggtitle("KEGG Enrichment for log2FC > 0 genes")
-    p2 <- dotplot(downscale.kk) +
-        ggtitle("KEGG Enrichment for log2FC < 0 genes")
-    ggsave(
-        fs::path(save.dir, paste0(file.name, ".KEGG.pdf")),
-        p1 + p2,
-        width = 14
-    )
-    write.xlsx2(
-        as.data.frame(upscale.kk),
-        fs::path(save.dir, paste0(file.name, ".KEGG.xlsx")),
-        sheetName = "avg_log2FC > 0"
-    )
-    write.xlsx2(
-        as.data.frame(downscale.kk),
-        fs::path(save.dir, paste0(file.name, ".KEGG.xlsx")),
-        sheetName = "avg_log2FC < 0",
-        append = TRUE
-    )
-}
-enrichmentInt3()
-
-# %% integrate de 4
-differentialExpressionInt4 <- function(level, findmarker = TRUE) {
-    subset.obj <- integrate.obj
-    compare.ident <- c(
-        "Tumor cell densely populated area", "Blood vessel rich area")
-    names(subset.obj@images) <- NULL
-
-    para.spots <- colnames(subset(subset.obj, idents = "Parancerous area"))
-    compare.spots <- colnames(subset(
-            subset.obj[, subset.obj@meta.data$level == level],
-            idents = compare.ident
-            ))
-
-    subset.obj <- subset(subset.obj, cells = c(compare.spots, para.spots))
-    group <- ifelse(
-        colnames(subset.obj) %in% para.spots,
-        "Parancerous area",
-        paste0(level, ".Tumor")
-    )
-    subset.obj@meta.data$group <- group
-
-    save.dir <- fs::path(save.dirs[["int"]], "tumor-vs-parancerous")
-    file.name <- paste0(level, ".Tumor.vs.Parancerous_area")
-    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-    if (findmarker) {
-        markers <- FindMarkers(
-            subset.obj,
-            paste0(level, ".Tumor"),
-            logfc.threshold = 1.5,
-            group.by = "group",
-            verbose = FALSE
-        )
-        save.path <- fs::path(save.dir, paste0(file.name, ".csv"))
-        write.csv(markers, save.path)
-    } else {
-        markers <- integrate.markers4[[level]]
-    }
-
-    tops <- c(
-        rownames(top_n(markers, n = 20, wt = avg_log2FC)),
-        rownames(top_n(markers, n = -20, wt = avg_log2FC))
-    )
-    p <- DoHeatmap(subset.obj, features = tops, group.by = "group") + NoLegend()
-    save.path <- fs::path(save.dir, paste0(file.name, ".pdf"))
-    ggsave(save.path, p)
-
-    tf.path <- fs::path(WORKDIR, "Data", "DatabaseExtract_v_1.01.csv")
-    tf.df <- read.csv(tf.path, row.names = 1)
-    tf.df <- filter(tf.df, Is.TF. == "Yes", TF.assessment == "Known motif")
-    tf.genes <- tf.df$HGNC.symbol
-    draw.df <- markers %>%
-        filter(p_val_adj < 0.05, rownames(markers) %in% tf.genes) %>%
-        arrange(desc(avg_log2FC))
-    write.csv(draw.df, fs::path(save.dir, paste0(file.name, ".TFs.csv")))
-    if (dim(draw.df)[1] > 100) {
-        draw.df <- rbind(
-            top_n(draw.df, 50, wt = avg_log2FC),
-            top_n(draw.df, -50, wt = avg_log2FC)
-        )
-    }
-    p <- DoHeatmap(subset.obj, features = rownames(draw.df), group.by = "group")
-    ggsave(fs::path(save.dir, paste0(level, "-TFs-heatmap.pdf")), p, height = 13)
-
-    rbp.path <- fs::path(WORKDIR, "Data", "cancers-751631-suppl-final.csv")
-    rbp.df <- read.csv(rbp.path, row.names = 1)
-    rbp.genes <- rownames(rbp.df)
-    draw.df <- markers %>%
-        filter(p_val_adj < 0.05, rownames(markers) %in% rbp.genes) %>%
-        arrange(desc(avg_log2FC))
-    write.csv(draw.df, fs::path(save.dir, paste0(file.name, ".RBPs.csv")))
-    if (dim(draw.df)[1] > 100) {
-        draw.df <- rbind(
-            top_n(draw.df, 50, wt = avg_log2FC),
-            top_n(draw.df, -50, wt = avg_log2FC)
-        )
-    }
-    p <- DoHeatmap(subset.obj, features = rownames(draw.df), group.by = "group")
-    ggsave(fs::path(save.dir, paste0(level, "-RBPs-heatmap.pdf")), p, height = 13)
-
-    return(markers)
-}
-
-integrate.markers4 <- mclapply(
-    c("IV", "GBM"),
-    differentialExpressionInt4,
-    findmarker = TRUE
-)
-names(integrate.markers4) <- c("IV", "GBM")
-
-# %% integrate de 4 draw
-differentialExpressionInt4Multi <- function(level) {
-    source(fs::path(WORKDIR, "src", "R", "utils.R"))
-    subset.obj <- integrate.obj
-    compare.ident <- c(
-        "Tumor cell densely populated area", "Blood vessel rich area")
-    names(subset.obj@images) <- NULL
-
-    para.spots <- colnames(subset(subset.obj, idents = "Parancerous area"))
-    compare.spots <- colnames(subset(
-            subset.obj[, subset.obj@meta.data$level == level],
-            idents = compare.ident
-            ))
-
-    subset.obj <- subset(subset.obj, cells = c(compare.spots, para.spots))
-    group <- ifelse(
-        colnames(subset.obj) %in% para.spots,
-        "Parancerous area",
-        paste0(level, ".Tumor")
-    )
-    subset.obj@meta.data$group <- group
-
-    save.dir <- fs::path(save.dirs[["int"]], "tumor-vs-parancerous")
-    file.name <- paste0(level, ".Tumor.vs.Parancerous_area")
-    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-    markers <- integrate.markers4[[level]]
-
-    tf.path <- fs::path(WORKDIR, "Data", "DatabaseExtract_v_1.01.csv")
-    tf.df <- read.csv(tf.path, row.names = 1)
-    tf.df <- filter(tf.df, Is.TF. == "Yes", TF.assessment == "Known motif")
-    tf.genes <- tf.df$HGNC.symbol
-    draw.df <- markers %>%
-        filter(p_val_adj < 0.05, rownames(markers) %in% tf.genes) %>%
-        arrange(desc(avg_log2FC))
-    if (dim(draw.df)[1] > 100) {
-        draw.df <- rbind(
-            top_n(draw.df, 50, wt = avg_log2FC),
-            top_n(draw.df, -50, wt = avg_log2FC)
-        )
-    }
-    p <- DoMultiBarHeatmap(
-        subset.obj,
-        features = rownames(draw.df),
-        group.by = "group",
-        additional.group.by = c("sample")
-    )
-    ggsave(fs::path(save.dir, paste0(level, "-TFs-heatmap.1.pdf")), p, height = 13)
-
-    rbp.path <- fs::path(WORKDIR, "Data", "cancers-751631-suppl-final.csv")
-    rbp.df <- read.csv(rbp.path, row.names = 1)
-    rbp.genes <- rownames(rbp.df)
-    draw.df <- markers %>%
-        filter(p_val_adj < 0.05, rownames(markers) %in% rbp.genes) %>%
-        arrange(desc(avg_log2FC))
-    if (dim(draw.df)[1] > 100) {
-        draw.df <- rbind(
-            top_n(draw.df, 50, wt = avg_log2FC),
-            top_n(draw.df, -50, wt = avg_log2FC)
-        )
-    }
-    p <- DoMultiBarHeatmap(
-        subset.obj,
-        features = rownames(draw.df),
-        group.by = "group",
-        additional.group.by = c("sample")
-    )
-    ggsave(fs::path(save.dir, paste0(level, "-RBPs-heatmap.1.pdf")), p, height = 13)
-}
-
-mclapply(c("IV", "GBM"), differentialExpressionInt4Multi)
+sapply(names(integrate.markers4), enrichmentInt4)

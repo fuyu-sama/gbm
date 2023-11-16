@@ -57,8 +57,6 @@ save.dirs <- lapply(
         return(save.dir)
     }
 )
-save.dirs[["int"]] <- fs::path(WORKDIR, "results", "integrate")
-if (! fs::dir_exists(save.dirs[["int"]])) fs::dir_create(save.dirs[["int"]])
 
 OrgDb <- org.Hs.eg.db
 
@@ -260,7 +258,7 @@ drawCellCycleViolin <- function(seurat.obj) {
 }
 mclapply(seurat.list, drawCellCycleViolin)
 
-# %% de
+# %% DE 1
 differentialExpression1 <- function(seurat.obj) {
     idx <- names(seurat.obj@images)
     markers <- FindAllMarkers(
@@ -280,7 +278,7 @@ differentialExpression1 <- function(seurat.obj) {
 }
 markers.list1 <- mclapply(seurat.list, differentialExpression1)
 
-# %% GO
+# %% GO 1
 enrichment1 <- function(idx) {
     clusters <- unique(markers.list1[[idx]]$cluster)
     for (cluster in clusters) {
@@ -404,7 +402,7 @@ enrichment1 <- function(idx) {
 }
 sapply(idx.full, enrichment1)
 
-# %% de 2 tumor(tumor + blood + cell densly) vs para (para + junc)
+# %% DE 2 tumor(tumor + blood + cell densly) vs para (para + junc)
 differentialExpression2 <- function(seurat.obj) {
     idx <- names(seurat.obj@images)
     compare.ident.1 <- list(
@@ -574,20 +572,6 @@ differentialExpression3 <- function(seurat.obj) {
         "Tumor cell densely populated area",
         "Tumor area 2"
     )
-    compare.idents[["22F-21576-1"]] <- c(
-        "Blood vessel rich area",
-        "Tumor cell densely populated area",
-        "Tumor area 3",
-        "Tumor area 4"
-    )
-    compare.idents[["22F-23738-2"]] <- c(
-        "Blood vessel rich area",
-        "Tumor cell densely populated area",
-        "Tumor area 5",
-        "Tumor area 6",
-        "Tumor area 7",
-        "Tumor area 8"
-    )
     seurat.obj <- subset(seurat.obj, idents = compare.idents[[idx]])
 
     save.dir <- fs::path(save.dirs[[idx]], "肿瘤各分区差异表达")
@@ -604,8 +588,13 @@ differentialExpression3 <- function(seurat.obj) {
         save.dir, paste0(idx, ".差异表达热图.pdf")
     )
     ggsave(save.path, p, height = 20, width = 15)
+
+    return(markers)
 }
-markers.list3 <- mclapply(seurat.list, differentialExpression3)
+markers.list3 <- mclapply(
+    seurat.list[c("21B-603-5", "22F-10823-3")],
+    differentialExpression3
+)
 
 # %% GO 3
 enrichment3 <- function(idx) {
@@ -729,4 +718,43 @@ enrichment3 <- function(idx) {
         )
     }
 }
-sapply(idx.full, enrichment3)
+sapply(c("21B-603-5", "22F-10823-3") , enrichment3)
+
+# %% DE 4 blood vessel vs. others
+differentialExpression4 <- function(seurat.obj) {
+    idx <- names(seurat.obj@images)
+    markers.list <- list()
+    for (cluster in unique(Idents(seurat.obj))) {
+        if (cluster == "Blood vessel rich area") next
+        subset.obj <- seurat.obj
+        names(subset.obj@images) <- NULL
+        subset.obj <- subset(
+            subset.obj,
+            idents = c("Blood vessel rich area", cluster)
+        )
+        markers <- FindAllMarkers(
+            subset.obj,
+            logfc.threshold = 0.1,
+            verbose = FALSE
+        )
+        save.dir <- fs::path(save.dirs[[idx]], "富血管区对比其他区")
+        if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+
+        save.path <- fs::path(
+            save.dir, paste(idx, cluster, "区域差异表达.csv", sep = ".")
+        )
+        write.csv(markers, save.path)
+
+        tops <- markers %>% group_by(cluster) %>% top_n(n = 50, wt = avg_log2FC)
+        p <- DoHeatmap(subset.obj, features = tops$gene) + NoLegend()
+        save.path <- fs::path(
+            save.dir, paste(idx, cluster, "区域差异表达热图.pdf", sep = ".")
+        )
+        ggsave(save.path, p, height = 20, width = 15)
+        markers.list[[cluster]] <- markers
+    }
+
+    return(markers.list)
+}
+
+markers.list4 <- mclapply(seurat.list, differentialExpression4)
