@@ -719,7 +719,7 @@ enrichment3 <- function(idx) {
         )
     }
 }
-sapply(c("21B-603-5", "22F-10823-3") , enrichment3)
+sapply(c("21B-603-5", "22F-10823-3"), enrichment3)
 
 # %% DE 4 blood vessel vs. others
 differentialExpression4 <- function(seurat.obj) {
@@ -765,6 +765,10 @@ differentialExpression1 <- function(seurat.obj) {
     idx <- names(seurat.obj@images)
     read.path <- fs::path(save.dirs[[idx]], paste0(idx, ".分区域差异表达.csv"))
     markers <- read.csv(read.path, row.names = 1)
+    markers$cluster <- factor(
+        markers$cluster,
+        levels = levels(Idents(seurat.obj))
+    )
     return(markers)
 }
 markers.list1 <- mclapply(seurat.list, differentialExpression1)
@@ -776,7 +780,7 @@ drawKinase <- function(seurat.obj) {
 
     marker.genes <- markers.list1[[idx]] %>%
         group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
         arrange(desc(avg_log2FC), .by_group = TRUE) %>%
         filter(gene %in% kinase.df$name)
 
@@ -793,6 +797,38 @@ drawKinase <- function(seurat.obj) {
     ggsave(save.path, p, height = 20, width = 15)
 }
 mclapply(seurat.list, drawKinase)
+
+# %%
+kinase.df <- jsonlite::fromJSON(fs::path(WORKDIR, "Data", "klifs.net.json"))
+drawKinaseTogether <- function(idx, level) {
+    marker.genes.1 <- markers.list1[[idx[1]]] %>%
+        group_by(cluster) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
+        filter(gene %in% kinase.df$name)
+    marker.genes.2 <- markers.list1[[idx[2]]] %>%
+        group_by(cluster) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
+        filter(gene %in% kinase.df$name)
+    marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
+        group_by(cluster)
+    draw.genes <- unique(marker.genes$gene)
+    #draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
+
+    p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
+    p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
+    p <- p1 + p2
+    save.path <- fs::path(WORKDIR, "results", paste0(level, "激酶表达.1.pdf"))
+    ggsave(save.path, p, height = 20, width = 30)
+
+    draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
+    p <- DoHeatmap(draw.seurat, features = draw.genes)
+    save.path <- fs::path(WORKDIR, "results", paste0(level, "激酶表达.2.pdf"))
+    ggsave(save.path, p, height = 20, width = 15)
+}
+drawKinaseTogether(c(idx.full[1], idx.full[2]), "IV")
+drawKinaseTogether(c(idx.full[3], idx.full[4]), "GBM")
 
 # %% ubiquitin
 flag <- TRUE
@@ -812,7 +848,7 @@ drawUbiquitin <- function(seurat.obj) {
 
     marker.genes <- markers.list1[[idx]] %>%
         group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
         arrange(desc(avg_log2FC), .by_group = TRUE) %>%
         filter(gene %in% ubiquitin.df$V6)
 
@@ -829,6 +865,38 @@ drawUbiquitin <- function(seurat.obj) {
 }
 mclapply(seurat.list, drawUbiquitin)
 
+# %%
+drawUbiquitinTogether <- function(idx, level) {
+    marker.genes.1 <- markers.list1[[idx[1]]] %>%
+        group_by(cluster) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
+        filter(gene %in% ubiquitin.df$V6)
+    marker.genes.2 <- markers.list1[[idx[2]]] %>%
+        group_by(cluster) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
+        filter(gene %in% ubiquitin.df$V6)
+
+    marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
+        group_by(cluster)
+    draw.genes <- unique(marker.genes$gene)
+    #draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
+
+    p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
+    p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
+    p <- p1 + p2
+    save.path <- fs::path(WORKDIR, "results", paste0(level, "泛素表达.1.pdf"))
+    ggsave(save.path, p, height = 20, width = 30)
+
+    draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
+    p <- DoHeatmap(draw.seurat, features = draw.genes)
+    save.path <- fs::path(WORKDIR, "results", paste0(level, "泛素表达.2.pdf"))
+    ggsave(save.path, p, height = 20, width = 15)
+}
+drawUbiquitinTogether(c(idx.full[1], idx.full[2]), "IV")
+drawUbiquitinTogether(c(idx.full[3], idx.full[4]), "GBM")
+
 # %% TF
 tf.df <- read.csv(fs::path(WORKDIR, "Data", "DatabaseExtract_v_1.01.csv"))
 tf.df <- filter(tf.df, TF.assessment == "Known motif")
@@ -837,7 +905,7 @@ drawTF <- function(seurat.obj) {
 
     marker.genes <- markers.list1[[idx]] %>%
         group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
         arrange(desc(avg_log2FC), .by_group = TRUE) %>%
         filter(gene %in% tf.df$HGNC.symbol)
 
@@ -854,6 +922,40 @@ drawTF <- function(seurat.obj) {
 }
 mclapply(seurat.list, drawTF)
 
+# %%
+drawTFTogether <- function(idx, level) {
+    marker.genes.1 <- markers.list1[[idx[1]]] %>%
+        group_by(cluster) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
+        filter(gene %in% tf.df$HGNC.symbol)
+    marker.genes.2 <- markers.list1[[idx[2]]] %>%
+        group_by(cluster) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
+        filter(gene %in% tf.df$HGNC.symbol)
+
+    marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
+        group_by(cluster)
+    draw.genes <- unique(marker.genes$gene)
+    #draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
+
+    p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
+    p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
+    p <- p1 + p2
+    save.path <- fs::path(
+        WORKDIR, "results", paste0(level, "转录因子表达.1.pdf"))
+    ggsave(save.path, p, height = 20, width = 30)
+
+    draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
+    p <- DoHeatmap(draw.seurat, features = draw.genes)
+    save.path <- fs::path(
+        WORKDIR, "results", paste0(level, "转录因子表达.2.pdf"))
+    ggsave(save.path, p, height = 20, width = 15)
+}
+drawTFTogether(c(idx.full[1], idx.full[2]), "IV")
+drawTFTogether(c(idx.full[3], idx.full[4]), "GBM")
+
 # %% RBP
 rbp.df <- read.csv(fs::path(WORKDIR, "Data", "cancers-751631-suppl-final.csv"))
 drawRBP <- function(seurat.obj) {
@@ -861,7 +963,7 @@ drawRBP <- function(seurat.obj) {
 
     marker.genes <- markers.list1[[idx]] %>%
         group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
         arrange(desc(avg_log2FC), .by_group = TRUE) %>%
         filter(gene %in% rbp.df$ID)
 
@@ -877,3 +979,35 @@ drawRBP <- function(seurat.obj) {
     ggsave(save.path, p, height = 30, width = 15)
 }
 mclapply(seurat.list, drawRBP)
+
+# %%
+drawRBPTogether <- function(idx, level) {
+    marker.genes.1 <- markers.list1[[idx[1]]] %>%
+        group_by(cluster) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
+        filter(gene %in% rbp.df$ID)
+    marker.genes.2 <- markers.list1[[idx[2]]] %>%
+        group_by(cluster) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
+        filter(gene %in% rbp.df$ID)
+
+    marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
+        group_by(cluster)
+    draw.genes <- unique(marker.genes$gene)
+    #draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
+
+    p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
+    p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
+    p <- p1 + p2
+    save.path <- fs::path(WORKDIR, "results", paste0(level, "RBP表达.1.pdf"))
+    ggsave(save.path, p, height = 20, width = 30)
+
+    draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
+    p <- DoHeatmap(draw.seurat, features = draw.genes)
+    save.path <- fs::path(WORKDIR, "results", paste0(level, "RBP表达.2.pdf"))
+    ggsave(save.path, p, height = 20, width = 15)
+}
+drawUbiquitinTogether(c(idx.full[1], idx.full[2]), "IV")
+drawUbiquitinTogether(c(idx.full[3], idx.full[4]), "GBM")
