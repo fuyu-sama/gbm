@@ -1009,5 +1009,5 @@ drawRBPTogether <- function(idx, level) {
     save.path <- fs::path(WORKDIR, "results", paste0(level, "RBP表达.2.pdf"))
     ggsave(save.path, p, height = 20, width = 15)
 }
-drawUbiquitinTogether(c(idx.full[1], idx.full[2]), "IV")
-drawUbiquitinTogether(c(idx.full[3], idx.full[4]), "GBM")
+drawRBPTogether(c(idx.full[1], idx.full[2]), "IV")
+drawRBPTogether(c(idx.full[3], idx.full[4]), "GBM")
