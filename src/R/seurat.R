@@ -33,13 +33,13 @@ library('parallel')
 library('dplyr')
 library('xlsx')
 library('ggplot2')
-library('ggsignif')
+library('ComplexHeatmap')
 library('Seurat')
 library('clusterProfiler')
 library('org.Hs.eg.db')
 
 # options
-options(mc.cores = 8)
+options(mc.cores = 10)
 options(future.globals.maxSize = 500 * 1024 ^ 3)
 
 # public variables
@@ -151,14 +151,14 @@ regionAnnotation <- function(seurat.obj) {
     idx <- names(seurat.obj@images)
     region.annotations <- list()
     region.annotations[["21B-603-5"]] <- c(
-        "4" = "Blood vessel rich area",
+        "4" = "Blood vessel rich tumor area",
         "2" = "Tumor cell densely populated area",
         "0" = "Tumor area 1",
         "1" = "Junction area",
         "3" = "Parancerous area"
     )
     region.annotations[["22F-10823-3"]] <- c(
-        "2" = "Blood vessel rich area",
+        "2" = "Blood vessel rich tumor area",
         "0" = "Tumor cell densely populated area",
         "5" = "Tumor area 2",
         "3" = "Junction area 2",
@@ -166,13 +166,13 @@ regionAnnotation <- function(seurat.obj) {
         "4" = "Parancerous area"
     )
     region.annotations[["22F-21576-1"]] <- c(
-        "0" = "Blood vessel rich area",
+        "0" = "Blood vessel rich tumor area",
         "2" = "Tumor cell densely populated area",
         "3" = "Tumor area 3",
         "1" = "Tumor area 4"
     )
     region.annotations[["22F-23738-2"]] <- c(
-        "2" = "Blood vessel rich area",
+        "2" = "Blood vessel rich tumor area",
         "0" = "Tumor cell densely populated area",
         "1" = "Tumor area 5",
         "4" = "Tumor area 6",
@@ -180,84 +180,15 @@ regionAnnotation <- function(seurat.obj) {
         "5" = "Tumor area 8"
     )
     seurat.obj <- RenameIdents(seurat.obj, region.annotations[[idx]])
-    p1 <- DimPlot(seurat.obj, reduction = "tsne", label = TRUE)
-    p2 <- SpatialDimPlot(seurat.obj, label.size = 3, alpha = 0.6, label = TRUE)
+    p1 <- DimPlot(seurat.obj, reduction = "tsne", label = FALSE) +
+        theme(legend.text = element_text(size = 20))
+    p2 <- SpatialDimPlot(seurat.obj, alpha = 0.6, label = FALSE) +
+        theme(legend.text = element_text(size = 20))
     save.path <- fs::path(save.dirs[[idx]], paste0(idx, ".分区.pdf"))
-    ggsave(save.path, p1 + p2, width = 21, height = 7)
+    ggsave(save.path, p1 + p2, width = 25, height = 7)
     return(seurat.obj)
 }
 seurat.list <- mclapply(seurat.list, regionAnnotation)
-
-# %% cell cycle
-cellCycle <- function(seurat.obj) {
-    idx <- names(seurat.obj@images)
-    seurat.obj <- CellCycleScoring(
-        seurat.obj,
-        g2m.features = cc.genes$g2m.genes,
-        s.features = cc.genes$s.genes
-    )
-    ggsave(
-        fs::path(save.dirs[[idx]], paste0(idx, ".CellCycle.Score.pdf")),
-        SpatialFeaturePlot(seurat.obj, c("S.Score", "G2M.Score")),
-        width = 14
-    )
-    ggsave(
-        fs::path(save.dirs[[idx]], paste0(idx, ".CellCycle.Phase.pdf")),
-        SpatialDimPlot(seurat.obj, "Phase")
-    )
-    return(seurat.obj)
-}
-seurat.list <- mclapply(seurat.list, cellCycle)
-
-# %% cell cycle plot
-drawCellCycleViolin <- function(seurat.obj) {
-    y_position <- list(
-        "21B-603-5" = c(6.5, 7.5, 7),
-        "22F-10823-3" = c(8, 9, 8.5),
-        "22F-21576-1" = c(6.5, 7.5, 7),
-        "22F-23738-2" = c(8, 9, 8.5)
-    )
-    resolutions <- list(
-        "21B-603-5" = "SCT_snn_res.0.1",
-        "22F-10823-3" = "SCT_snn_res.0.1",
-        "22F-21576-1" = "SCT_snn_res.0.08",
-        "22F-23738-2" = "SCT_snn_res.0.06"
-    )
-    idx <- names(seurat.obj@images)
-    pdim <- SpatialDimPlot(seurat.obj, group.by = resolutions[[idx]])
-    names(seurat.obj@images) <- NULL
-    DefaultAssay(seurat.obj) <- "Spatial"
-    regions <- seurat.obj@meta.data[resolutions[[idx]]]
-    g1.spots <- colnames(subset(seurat.obj, subset = Phase == "G1"))
-    g2m.spots <- colnames(subset(seurat.obj, subset = Phase == "G2M"))
-    s.spots <- colnames(subset(seurat.obj, subset = Phase == "S"))
-    draw.df <- rbind(
-        data.frame(
-            "CD58" = GetAssayData(seurat.obj)["CD58", g1.spots],
-            "Phase" = rep("G1", length(g1.spots))),
-        data.frame(
-            "CD58" = GetAssayData(seurat.obj)["CD58", g2m.spots],
-            "Phase" = rep("G2M", length(g2m.spots))),
-        data.frame(
-            "CD58" = GetAssayData(seurat.obj)["CD58", s.spots],
-            "Phase" = rep("S", length(s.spots)))
-    )
-    draw.df$Region <- regions[rownames(draw.df), resolutions[[idx]]]
-    draw.df <- draw.df[draw.df$CD58 > 0, ]
-    comparisons <- list(c("G1", "G2M"), c("G1", "S"), c("G2M", "S"))
-    p <- ggplot(draw.df, aes(x = Phase, y = CD58)) +
-        geom_violin() +
-        facet_wrap(~Region) +
-        geom_signif(comparisons = comparisons, y_position = y_position[[idx]], map_signif_level = TRUE)
-
-    save.path <- fs::path(save.dirs[[idx]], paste0(idx, ".CD58.Violin.pdf"))
-    ggsave(save.path, p + pdim, width = 17)
-
-    p <- ggplot(draw.df, aes(x = Region, fill = Phase)) + geom_bar(position="fill")
-    save.path <- fs::path(save.dirs[[idx]], paste0(idx, ".Phase.stack.pdf"))
-    ggsave(save.path, p + pdim, width = 17)
-}
-mclapply(seurat.list, drawCellCycleViolin)
 
 # %% DE 1
 differentialExpression1 <- function(seurat.obj) {
@@ -269,10 +200,13 @@ differentialExpression1 <- function(seurat.obj) {
     write.csv(markers, save.path)
 
     tops <- markers %>% group_by(cluster) %>% top_n(n = 30, wt = avg_log2FC)
-    p <- DoHeatmap(seurat.obj, features = tops$gene) + NoLegend()
+    spots <- names(sort(Idents(seurat.obj)))
+    draw.matrix <- GetAssayData(
+        seurat.obj, assay = "SCT", slot = "scale.data")[tops$gene, spots]
     save.path <- fs::path(
         save.dirs[[idx]], paste0(idx, ".分区域差异表达热图.pdf")
     )
+    p <- DoHeatmap(seurat.obj, features = tops$gene) + NoLegend()
     ggsave(save.path, p, height = 20, width = 15)
 
     return(markers)
@@ -408,12 +342,12 @@ differentialExpression2 <- function(seurat.obj) {
     idx <- names(seurat.obj@images)
     compare.ident.1 <- list(
         "21B-603-5" = c(
-            "Blood vessel rich area",
+            "Blood vessel rich tumor area",
             "Tumor cell densely populated area",
             "Tumor area 1"
             ),
         "22F-10823-3" = c(
-            "Blood vessel rich area",
+            "Blood vessel rich tumor area",
             "Tumor cell densely populated area",
             "Tumor area 2"
         )
@@ -564,12 +498,12 @@ differentialExpression3 <- function(seurat.obj) {
     names(seurat.obj@images) <- NULL
     compare.idents <- list()
     compare.idents[["21B-603-5"]] <- c(
-        "Blood vessel rich area",
+        "Blood vessel rich tumor area",
         "Tumor cell densely populated area",
         "Tumor area 1"
     )
     compare.idents[["22F-10823-3"]] <- c(
-        "Blood vessel rich area",
+        "Blood vessel rich tumor area",
         "Tumor cell densely populated area",
         "Tumor area 2"
     )
@@ -726,12 +660,12 @@ differentialExpression4 <- function(seurat.obj) {
     idx <- names(seurat.obj@images)
     markers.list <- list()
     for (cluster in unique(Idents(seurat.obj))) {
-        if (cluster == "Blood vessel rich area") next
+        if (cluster == "Blood vessel rich tumor area") next
         subset.obj <- seurat.obj
         names(subset.obj@images) <- NULL
         subset.obj <- subset(
             subset.obj,
-            idents = c("Blood vessel rich area", cluster)
+            idents = c("Blood vessel rich tumor area", cluster)
         )
         markers <- FindAllMarkers(
             subset.obj,
@@ -814,7 +748,7 @@ drawKinaseTogether <- function(idx, level) {
     marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
         group_by(cluster)
     draw.genes <- unique(marker.genes$gene)
-    #draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
+    draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
 
     p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
     p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
@@ -881,7 +815,7 @@ drawUbiquitinTogether <- function(idx, level) {
     marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
         group_by(cluster)
     draw.genes <- unique(marker.genes$gene)
-    #draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
+    draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
 
     p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
     p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
@@ -938,7 +872,7 @@ drawTFTogether <- function(idx, level) {
     marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
         group_by(cluster)
     draw.genes <- unique(marker.genes$gene)
-    #draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
+    draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
 
     p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
     p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
@@ -996,7 +930,7 @@ drawRBPTogether <- function(idx, level) {
     marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
         group_by(cluster)
     draw.genes <- unique(marker.genes$gene)
-    #draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
+    draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
 
     p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
     p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
@@ -1011,3 +945,32 @@ drawRBPTogether <- function(idx, level) {
 }
 drawRBPTogether(c(idx.full[1], idx.full[2]), "IV")
 drawRBPTogether(c(idx.full[3], idx.full[4]), "GBM")
+
+# %%
+region.1 <- "Parancerous area"
+region.2 <- "Parancerous area"
+de.table.1 <- filter(
+    markers.list1[[idx.full[1]]],
+    p_val_adj < 0.05,
+    cluster == region.1
+)
+colnames.new <- paste(idx.full[1], colnames(de.table.1), sep = ".")
+colnames.new[7] <- "gene"
+colnames(de.table.1) <- colnames.new
+de.table.2 <- filter(
+    markers.list1[[idx.full[2]]],
+    p_val_adj < 0.05,
+    cluster == region.2
+)
+colnames.new <- paste(idx.full[2], colnames(de.table.2), sep = ".")
+colnames.new[7] <- "gene"
+colnames(de.table.2) <- colnames.new
+inter.genes <- intersect(de.table.1$gene, de.table.1$gene)
+de.table.1 <- filter(de.table.1, gene %in% inter.genes)
+de.table.2 <- filter(de.table.2, gene %in% inter.genes)
+de.table <- merge(de.table.1, de.table.2, by = "gene")
+write.path <- fs::path(
+    WORKDIR, "results", "交集基因",
+    paste("IV.交集基因", region.1, region.2, "csv", sep = ".")
+)
+write.csv(de.table, write.path, row.names = FALSE)
