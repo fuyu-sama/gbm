@@ -947,30 +947,25 @@ drawRBPTogether(c(idx.full[1], idx.full[2]), "IV")
 drawRBPTogether(c(idx.full[3], idx.full[4]), "GBM")
 
 # %%
-region.1 <- "Parancerous area"
-region.2 <- "Parancerous area"
 de.table.1 <- filter(
-    markers.list1[[idx.full[1]]],
-    p_val_adj < 0.05,
-    cluster == region.1
+    markers.list2[[idx.full[1]]],
+    p_val_adj < 0.05
 )
 colnames.new <- paste(idx.full[1], colnames(de.table.1), sep = ".")
-colnames.new[7] <- "gene"
 colnames(de.table.1) <- colnames.new
 de.table.2 <- filter(
-    markers.list1[[idx.full[2]]],
-    p_val_adj < 0.05,
-    cluster == region.2
+    markers.list2[[idx.full[2]]],
+    p_val_adj < 0.05
 )
 colnames.new <- paste(idx.full[2], colnames(de.table.2), sep = ".")
-colnames.new[7] <- "gene"
 colnames(de.table.2) <- colnames.new
-inter.genes <- intersect(de.table.1$gene, de.table.1$gene)
-de.table.1 <- filter(de.table.1, gene %in% inter.genes)
-de.table.2 <- filter(de.table.2, gene %in% inter.genes)
-de.table <- merge(de.table.1, de.table.2, by = "gene")
+inter.genes <- intersect(rownames(de.table.1), rownames(de.table.2))
+de.table.1 <- de.table.1[inter.genes, ]
+de.table.2 <- de.table.2[inter.genes, ]
+de.table <- merge(de.table.1, de.table.2, by = 0)
+colnames(de.table)[1] <- "Gene"
 write.path <- fs::path(
     WORKDIR, "results", "交集基因",
-    paste("IV.交集基因", region.1, region.2, "csv", sep = ".")
+    paste("IV.交集基因.肿瘤vs癌旁", "csv", sep = ".")
 )
 write.csv(de.table, write.path, row.names = FALSE)
