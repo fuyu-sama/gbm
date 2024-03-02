@@ -33,6 +33,7 @@ library('parallel')
 library('dplyr')
 library('xlsx')
 library('ggplot2')
+library('ggvenn')
 library('ComplexHeatmap')
 library('Seurat')
 library('clusterProfiler')
@@ -41,6 +42,7 @@ library('org.Hs.eg.db')
 # options
 options(mc.cores = 10)
 options(future.globals.maxSize = 500 * 1024 ^ 3)
+future::plan("multicore", workers = 1)
 
 # public variables
 ggsave <- function(...) suppressMessages(ggplot2::ggsave(...))
@@ -92,6 +94,7 @@ preProcessing <- function(seurat.obj) {
         seurat.obj,
         assay = "Spatial",
         variable.features.n = 9000,
+        return.only.var.genes = FALSE,
         verbose = FALSE
     )
     seurat.obj <- RunPCA(
@@ -145,6 +148,7 @@ finalCluster <- function(seurat.obj) {
     return(seurat.obj)
 }
 seurat.list <- mclapply(seurat.list, finalCluster)
+saveSeuratList()
 
 # %% annotation
 regionAnnotation <- function(seurat.obj) {
@@ -159,8 +163,10 @@ regionAnnotation <- function(seurat.obj) {
     )
     region.annotations[["22F-10823-3"]] <- c(
         "2" = "Blood vessel rich tumor area",
-        "0" = "Tumor cell densely populated area",
-        "5" = "Tumor area 2",
+        #"0" = "Tumor cell densely populated area",
+        #"5" = "Tumor area 2",
+        "5" = "Tumor cell densely populated area",
+        "0" = "Tumor area 2",
         "3" = "Junction area 2",
         "1" = "Junction area",
         "4" = "Parancerous area"
@@ -490,7 +496,7 @@ enrichment2 <- function(idx) {
         width = 14
     )
 }
-sapply(c("21B-603-5", "22F-10823-3") , enrichment2)
+sapply(c("21B-603-5", "22F-10823-3"), enrichment2)
 
 # %% DE 3 inter tumor
 differentialExpression3 <- function(seurat.obj) {
@@ -753,12 +759,14 @@ drawKinaseTogether <- function(idx, level) {
     p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
     p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
     p <- p1 + p2
-    save.path <- fs::path(WORKDIR, "results", paste0(level, "激酶表达.1.pdf"))
+    save.path <- fs::path(
+        WORKDIR, "results", "基因列表", paste0(level, "激酶表达.1.pdf"))
     ggsave(save.path, p, height = 20, width = 30)
 
     draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
     p <- DoHeatmap(draw.seurat, features = draw.genes)
-    save.path <- fs::path(WORKDIR, "results", paste0(level, "激酶表达.2.pdf"))
+    save.path <- fs::path(
+        WORKDIR, "results", "基因列表", paste0(level, "激酶表达.2.pdf"))
     ggsave(save.path, p, height = 20, width = 15)
 }
 drawKinaseTogether(c(idx.full[1], idx.full[2]), "IV")
@@ -820,12 +828,14 @@ drawUbiquitinTogether <- function(idx, level) {
     p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
     p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
     p <- p1 + p2
-    save.path <- fs::path(WORKDIR, "results", paste0(level, "泛素表达.1.pdf"))
+    save.path <- fs::path(
+        WORKDIR, "results", "基因列表", paste0(level, "泛素表达.1.pdf"))
     ggsave(save.path, p, height = 20, width = 30)
 
     draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
     p <- DoHeatmap(draw.seurat, features = draw.genes)
-    save.path <- fs::path(WORKDIR, "results", paste0(level, "泛素表达.2.pdf"))
+    save.path <- fs::path(
+        WORKDIR, "results", "基因列表", paste0(level, "泛素表达.2.pdf"))
     ggsave(save.path, p, height = 20, width = 15)
 }
 drawUbiquitinTogether(c(idx.full[1], idx.full[2]), "IV")
@@ -878,13 +888,13 @@ drawTFTogether <- function(idx, level) {
     p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
     p <- p1 + p2
     save.path <- fs::path(
-        WORKDIR, "results", paste0(level, "转录因子表达.1.pdf"))
+        WORKDIR, "results", "基因列表", paste0(level, "转录因子表达.1.pdf"))
     ggsave(save.path, p, height = 20, width = 30)
 
     draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
     p <- DoHeatmap(draw.seurat, features = draw.genes)
     save.path <- fs::path(
-        WORKDIR, "results", paste0(level, "转录因子表达.2.pdf"))
+        WORKDIR, "results", "基因列表", paste0(level, "转录因子表达.2.pdf"))
     ggsave(save.path, p, height = 20, width = 15)
 }
 drawTFTogether(c(idx.full[1], idx.full[2]), "IV")
@@ -935,37 +945,74 @@ drawRBPTogether <- function(idx, level) {
     p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
     p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
     p <- p1 + p2
-    save.path <- fs::path(WORKDIR, "results", paste0(level, "RBP表达.1.pdf"))
+    save.path <- fs::path(
+        WORKDIR, "results", "基因列表", paste0(level, "RBP表达.1.pdf"))
     ggsave(save.path, p, height = 20, width = 30)
 
     draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
     p <- DoHeatmap(draw.seurat, features = draw.genes)
-    save.path <- fs::path(WORKDIR, "results", paste0(level, "RBP表达.2.pdf"))
+    save.path <- fs::path(
+        WORKDIR, "results", "基因列表", paste0(level, "RBP表达.2.pdf"))
     ggsave(save.path, p, height = 20, width = 15)
 }
 drawRBPTogether(c(idx.full[1], idx.full[2]), "IV")
 drawRBPTogether(c(idx.full[3], idx.full[4]), "GBM")
 
 # %%
-de.table.1 <- filter(
-    markers.list2[[idx.full[1]]],
-    p_val_adj < 0.05
+differentialExpression5 <- function() {
+    markers.list5 <- list()
+    # iv 密集 vs. 瘤旁
+    idx <- "21B-603-5"
+    markers.list5[[idx]] <- FindMarkers(
+        seurat.list[[idx]],
+        ident.1 = "Tumor cell densely populated area",
+        ident.2 = "Parancerous area",
+        logfc.threshold = 0.1,
+        verbose = FALSE
+    )
+    idx <- "22F-10823-3"
+    markers.list5[[idx]] <- FindMarkers(
+        seurat.list[[idx]],
+        ident.1 = "Tumor cell densely populated area",
+        ident.2 = "Parancerous area",
+        logfc.threshold = 0.1,
+        verbose = FALSE
+    )
+    return(markers.list5)
+}
+markers.list5 <- differentialExpression5()
+
+# %%
+upgenes.1 <- rownames(
+    filter(markers.list5[[idx.full[1]]], avg_log2FC > 0.5, p_val_adj < 0.05))
+upgenes.2 <- rownames(
+    filter(markers.list5[[idx.full[2]]], avg_log2FC > 0.5, p_val_adj < 0.05))
+upgenes <- intersect(upgenes.1, upgenes.2)
+
+pdf(fs::path(WORKDIR, "results", "交集基因", "密集vs癌旁上调基因交集韦恩图.pdf"))
+ggvenn(list("21B-603-5" = upgenes.1, "22F-10823-3" = upgenes.2), idx.full[1:2])
+dev.off()
+
+p1 <- DoHeatmap(seurat.list[[idx.full[1]]], features = upgenes) + NoLegend()
+p2 <- DoHeatmap(seurat.list[[idx.full[2]]], features = upgenes) + NoLegend()
+ggsave(
+    fs::path(WORKDIR, "results", "交集基因", "密集vs癌旁上调基因交集热图.pdf"),
+    p1 + p2, width = 14, height = 10
 )
-colnames.new <- paste(idx.full[1], colnames(de.table.1), sep = ".")
-colnames(de.table.1) <- colnames.new
-de.table.2 <- filter(
-    markers.list2[[idx.full[2]]],
-    p_val_adj < 0.05
+
+downgenes.1 <- rownames(
+    filter(markers.list5[[idx.full[1]]], avg_log2FC < -0.5, p_val_adj < 0.05))
+downgenes.2 <- rownames(
+    filter(markers.list5[[idx.full[2]]], avg_log2FC < -0.5, p_val_adj < 0.05))
+downgenes <- intersect(downgenes.1, downgenes.2)
+
+p1 <- DoHeatmap(seurat.list[[idx.full[1]]], features = downgenes) + NoLegend()
+p2 <- DoHeatmap(seurat.list[[idx.full[2]]], features = downgenes) + NoLegend()
+ggsave(
+    fs::path(WORKDIR, "results", "交集基因", "密集vs癌旁下调基因交集热图.pdf"),
+    p1 + p2, width = 14, height = 10
 )
-colnames.new <- paste(idx.full[2], colnames(de.table.2), sep = ".")
-colnames(de.table.2) <- colnames.new
-inter.genes <- intersect(rownames(de.table.1), rownames(de.table.2))
-de.table.1 <- de.table.1[inter.genes, ]
-de.table.2 <- de.table.2[inter.genes, ]
-de.table <- merge(de.table.1, de.table.2, by = 0)
-colnames(de.table)[1] <- "Gene"
-write.path <- fs::path(
-    WORKDIR, "results", "交集基因",
-    paste("IV.交集基因.肿瘤vs癌旁", "csv", sep = ".")
-)
-write.csv(de.table, write.path, row.names = FALSE)
+
+pdf(fs::path(WORKDIR, "results", "交集基因", "密集vs癌旁下调基因交集韦恩图.pdf"))
+ggvenn(list("21B-603-5" = downgenes.1, "22F-10823-3" = downgenes.2), idx.full[1:2])
+dev.off()
