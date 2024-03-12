@@ -33,7 +33,6 @@ library('parallel')
 library('dplyr')
 library('xlsx')
 library('ggplot2')
-library('ggsignif')
 library('Seurat')
 library('clusterProfiler')
 library('org.Hs.eg.db')
@@ -777,46 +776,56 @@ markers.list4.6 <- read.csv(
 )
 markers.list4.6 <- differentialExpression4.6(integrate.obj)
 
-# %%
-set.dir <- fs::path(WORKDIR, "results", "integrate", "交集基因")
-# set 1: IV 密集 vs IV 癌旁
-set1.up <- intersect(
-    rownames(filter(markers.list4.5, p_val_adj < 0.05, avg_log2FC > 0.5)),
-    rownames(filter(markers.list4.6, p_val_adj < 0.05, avg_log2FC > 0.5))
-)
-set1.down <- intersect(
-    rownames(filter(markers.list4.5, p_val_adj < 0.05, avg_log2FC < -0.5)),
-    rownames(filter(markers.list4.6, p_val_adj < 0.05, avg_log2FC < -0.5))
-)
-save.dir <- fs::path(set.dir, "集合1IV密集vsIV瘤旁")
-if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-write.csv(set1.up, fs::path(save.dir, "集合1IV密集vsIV瘤旁上调.csv"))
-write.csv(set1.down, fs::path(save.dir, "集合1IV密集vsIV瘤旁下调.csv"))
-enrichmentGenelist(set1.up, fs::path(set.dir, "集合1IV密集vsIV瘤旁上调"))
-enrichmentGenelist(set1.down, fs::path(set.dir, "集合1IV密集vsIV瘤旁下调"))
+# %% set list
+acquireSetList <- function() {
+    set.dir <- fs::path(WORKDIR, "results", "integrate", "交集基因")
+    # set 1: IV 密集 vs IV 癌旁
+    set1.up <- intersect(
+        rownames(filter(markers.list4.5, p_val_adj < 0.05, avg_log2FC > 0.5)),
+        rownames(filter(markers.list4.6, p_val_adj < 0.05, avg_log2FC > 0.5))
+    )
+    set1.down <- intersect(
+        rownames(filter(markers.list4.5, p_val_adj < 0.05, avg_log2FC < -0.5)),
+        rownames(filter(markers.list4.6, p_val_adj < 0.05, avg_log2FC < -0.5))
+    )
+    save.dir <- fs::path(set.dir, "集合1IV密集vsIV瘤旁")
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    write.csv(set1.up, fs::path(save.dir, "集合1IV密集vsIV瘤旁上调.csv"))
+    write.csv(set1.down, fs::path(save.dir, "集合1IV密集vsIV瘤旁下调.csv"))
+    enrichmentGenelist(set1.up, fs::path(set.dir, "集合1IV密集vsIV瘤旁上调"))
+    enrichmentGenelist(set1.down, fs::path(set.dir, "集合1IV密集vsIV瘤旁下调"))
 
-# set 2: GBM 密集 vs IV 癌旁
-set2.up <- intersect(
-    rownames(filter(markers.list4.2, p_val_adj < 0.05, avg_log2FC > 0.5)),
-    rownames(filter(markers.list4.3, p_val_adj < 0.05, avg_log2FC > 0.5))
-)
-set2.down <- intersect(
-    rownames(filter(markers.list4.2, p_val_adj < 0.05, avg_log2FC < -0.5)),
-    rownames(filter(markers.list4.3, p_val_adj < 0.05, avg_log2FC < -0.5))
-)
-save.dir <- fs::path(set.dir, "集合2GBM密集vsIV瘤旁")
-if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-write.csv(set2.up, fs::path(save.dir, "集合2GBM密集vsIV瘤旁上调.csv"))
-write.csv(set2.down, fs::path(save.dir, "集合2GBM密集vsIV瘤旁下调.csv"))
-enrichmentGenelist(set2.up, fs::path(set.dir, "集合2GBM密集vsIV瘤旁上调"))
-enrichmentGenelist(set2.down, fs::path(set.dir, "集合2GBM密集vsIV瘤旁下调"))
+    # set 2: GBM 密集 vs IV 癌旁
+    set2.up <- intersect(
+        rownames(filter(markers.list4.2, p_val_adj < 0.05, avg_log2FC > 0.5)),
+        rownames(filter(markers.list4.3, p_val_adj < 0.05, avg_log2FC > 0.5))
+    )
+    set2.down <- intersect(
+        rownames(filter(markers.list4.2, p_val_adj < 0.05, avg_log2FC < -0.5)),
+        rownames(filter(markers.list4.3, p_val_adj < 0.05, avg_log2FC < -0.5))
+    )
+    save.dir <- fs::path(set.dir, "集合2GBM密集vsIV瘤旁")
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    write.csv(set2.up, fs::path(save.dir, "集合2GBM密集vsIV瘤旁上调.csv"))
+    write.csv(set2.down, fs::path(save.dir, "集合2GBM密集vsIV瘤旁下调.csv"))
+    enrichmentGenelist(set2.up, fs::path(set.dir, "集合2GBM密集vsIV瘤旁上调"))
+    enrichmentGenelist(set2.down, fs::path(set.dir, "集合2GBM密集vsIV瘤旁下调"))
 
-# set 3: set1 && set2
-set3.up <- intersect(set1.up, set2.up)
-set3.down <- intersect(set1.down, set2.down)
-save.dir <- fs::path(set.dir, "集合3集合1+集合2")
-if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-write.csv(set3.up, fs::path(save.dir, "集合3集合1+集合2上调.csv"))
-write.csv(set3.down, fs::path(save.dir, "集合3集合1+集合2下调.csv"))
-enrichmentGenelist(set3.up, fs::path(set.dir, "集合3集合1+集合2上调"))
-enrichmentGenelist(set3.down, fs::path(set.dir, "集合3集合1+集合2下调"))
+    # set 3: set1 && set2
+    set3.up <- intersect(set1.up, set2.up)
+    set3.down <- intersect(set1.down, set2.down)
+    save.dir <- fs::path(set.dir, "集合3集合1+集合2")
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    write.csv(set3.up, fs::path(save.dir, "集合3集合1+集合2上调.csv"))
+    write.csv(set3.down, fs::path(save.dir, "集合3集合1+集合2下调.csv"))
+    enrichmentGenelist(set3.up, fs::path(set.dir, "集合3集合1+集合2上调"))
+    enrichmentGenelist(set3.down, fs::path(set.dir, "集合3集合1+集合2下调"))
+
+    return.list = list(
+        "set1" = list("up" = set1.up, "down" = set1.down),
+        "set2" = list("up" = set2.up, "down" = set2.down),
+        "set3" = list("up" = set3.up, "down" = set3.down),
+    )
+    return(return.list)
+}
+set.list <- acquireSetList()
