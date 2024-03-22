@@ -31,6 +31,7 @@
 library <- function(...) suppressMessages(base::library(...))
 library('dplyr')
 library('ggplot2')
+library('clusterProfiler')
 library('org.Hs.eg.db')
 
 # public variables
@@ -76,18 +77,6 @@ enrichmentGenelist <- function(markers, save.dir) {
         qvalueCutoff = 0.1
     )
 
-    p1 <- dotplot(upscale.ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment for log2FC > 0 genes")
-    p2 <- dotplot(downscale.ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment for log2FC < 0 genes")
-    ggsave(
-        fs::path(save.dir.go, "GO.pdf"),
-        p1 + p2,
-        width = 14,
-        height = 15
-    )
     write.csv(as.data.frame(ego), fs::path(save.dir.go, "GO.csv"))
 
     save.dir.kegg <- fs::path(save.dir, "KEGG")
@@ -113,6 +102,42 @@ for (idx in names(seurat.list)) {
 }
 
 # %%
+idx <- idx.full[1]
+save.dir <- fs::path(save.dirs[[idx]], "GO")
+cluster <- "Tumor_cell_densely_populated_area"
+pathway.list <- list()
+read.df <- xlsx::read.xlsx2(
+    fs::path(save.dir, paste(idx, cluster, "GO.xlsx", sep = ".")),
+    row.names = 1,
+    sheetName = "avg_log2FC > 0"
+)
+pathway.list[[idx.full[1]]] <- read.df$Description
+
+idx <- idx.full[2]
+save.dir <- fs::path(save.dirs[[idx]], "GO")
+cluster <- "Tumor_cell_densely_populated_area"
+read.df <- xlsx::read.xlsx2(
+    fs::path(save.dir, paste(idx, cluster, "GO.xlsx", sep = ".")),
+    row.names = 1,
+    sheetName = "avg_log2FC > 0"
+)
+pathway.list[[idx.full[2]]] <- read.df$Description
+
+overlaps <- gplots::venn(pathway.list, show.plot = FALSE)
+overlaps <- attributes(overlaps)$intersections
+capture.output(
+    overlaps,
+    file = fs::path(save.path, "GO.txt")
+)
+
+VennDiagram::venn.diagram(
+    pathway.list,
+    fs::path(save.path, "GO-venn.pdf"),
+    imagetype = "pdf",
+    disable.logging = TRUE
+)
+
+# %%
 save.path <- fs::path(WORKDIR, "results", "密集区交集")
 if (! fs::dir_exists(save.path)) fs::dir_create(save.path)
 
@@ -125,14 +150,6 @@ genes.list2 <- markers.list1[[idx.full[2]]] %>%
     filter(cluster == "Tumor cell densely populated area") %>%
     filter(p_val_adj < 0.05, avg_log2FC > .5)
 densly.genes[[idx.full[2]]] <- genes.list2$gene
-genes.list3 <- markers.list1[[idx.full[3]]] %>%
-    filter(cluster == "Tumor cell densely populated area") %>%
-    filter(p_val_adj < 0.05, avg_log2FC > .5)
-densly.genes[[idx.full[3]]] <- genes.list1$gene
-genes.list4 <- markers.list1[[idx.full[4]]] %>%
-    filter(cluster == "Tumor cell densely populated area") %>%
-    filter(p_val_adj < 0.05, avg_log2FC > .5)
-densly.genes[[idx.full[4]]] <- genes.list2$gene
 
 overlaps <- gplots::venn(densly.genes, show.plot = FALSE)
 overlaps <- attributes(overlaps)$intersections
@@ -143,3 +160,5 @@ VennDiagram::venn.diagram(
     imagetype = "png",
     disable.logging = TRUE
 )
+
+#enrichmentGenelist(overlaps[["21B-603-5:22F-10823-3"]], save.path)
