@@ -7,6 +7,7 @@ spaceranger
 cellranger
 .Rprofile
 renv.lock
+.tool-versions
 !.gitignore
 !/src/
 !/src/test-scripts/
