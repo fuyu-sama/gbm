@@ -439,20 +439,43 @@ regionAnnotation <- function(seurat.obj) {
     Idents(seurat.obj) <- paste(
         seurat.obj@meta.data$sample, Idents(seurat.obj), sep = ".")
     seurat.obj <- RenameIdents(seurat.obj, region.annotations)
-    p <- SpatialDimPlot(seurat.obj, label.size = 3, alpha = 0.6, label = TRUE)
+
+    regions <- unique(as.character(region.annotations))
+    cols <- DiscretePalette(length(regions))
+    names(cols) <- regions
+    cols["Tumor area 2"] <- "#8fb2c9"
+
+    p <- SpatialDimPlot(
+        seurat.obj, label.size = 3, alpha = 1, label = TRUE, cols = cols
+    )
     save.path <- fs::path(save.dirs[["int"]], "分区.pdf")
     ggsave(save.path, p, width = 28, height = 7)
 
-    p1 <- DimPlot(
-        seurat.obj,
-        reduction = "tsne",
-        cols = DiscretePalette(length(region.annotations))
-    )
+    p1 <- DimPlot(seurat.obj, reduction = "tsne", cols = cols)
     p2 <- DimPlot(seurat.obj, reduction = "tsne", group.by = "sample")
     ggsave(fs::path(save.dirs[["int"]], "integrate.tsne.pdf"), p1 + p2, width = 20)
     return(seurat.obj)
 }
 integrate.obj <- regionAnnotation(integrate.obj)
+
+# %%
+differentialExpression1 <- function(integrate.obj) {
+    markers <- FindAllMarkers(
+        integrate.obj,
+        logfc.threshold = 0.1,
+        verbose = FALSE
+    )
+
+    save.dir <- fs::path(save.dirs[["int"]])
+    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    write.csv(markers, fs::path(save.dir, "差异表格.csv"))
+
+    tops <- markers %>% top_n(n = 20, wt = avg_log2FC) %>% rownames()
+    p <- DoHeatmap(integrate.obj, features = tops)
+    ggsave(fs::path(save.dir, "差异热图.pdf"), p)
+    return(markers)
+}
+markers.list1 <- differentialExpression1(integrate.obj)
 
 # %% 2.IV整合对比
 differentialExpression2 <- function(integrate.obj) {
