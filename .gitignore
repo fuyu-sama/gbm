@@ -6,7 +6,6 @@ draw_genes
 spaceranger
 cellranger
 .Rprofile
-renv.lock
 .tool-versions
 !.gitignore
 !/src/
