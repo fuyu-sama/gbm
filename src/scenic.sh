@@ -3,6 +3,8 @@
 WORKDIR=$HOME/workspace/gbm
 cd $WORKDIR
 
+source venv/bin/activate
+
 ranking_10k=Data/scenic/hg38_10kbp_up_10kbp_down_full_tx_v10_clust.genes_vs_motifs.rankings.feather
 ranking_500bp=Data/scenic/hg38_500bp_up_100bp_down_full_tx_v10_clust.genes_vs_motifs.rankings.feather
 ann_fname=Data/scenic/motifs-v10nr_clust-nr.hgnc-m0.001-o0.0.tbl
@@ -27,4 +29,4 @@ pyscenic aucell \
     --output results/scenic/$1.auc.csv \
     --num_workers 10
 
-python src/scenic-binarize.py $1
+python src/scenic-downstream.py $1
