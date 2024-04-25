@@ -479,3 +479,23 @@ pDotPlot <- function(...) {
         theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
     return(p)
 }
+
+histPlot <- function(object, feature, threshold.df) {
+    DefaultAssay(object) <- "SCENIC"
+    expression.df <- GetAssayData(object, slot = "data", assay = "SCENIC")
+    expression <- expression.df[feature, ] %>% as.data.frame()
+    colnames(expression) <- c("AUC")
+    expression <- filter(expression, AUC > 0)
+    threshold <- threshold.df[feature, 1]
+    expression$sig <- ifelse(
+        expression$AUC > threshold,
+        "yes", "no"
+    )
+    p <- ggplot(expression, aes(x = AUC, fill = sig)) +
+        geom_histogram(alpha = 0.5, bins = 200) +
+        geom_vline(aes(xintercept = threshold), linetype = "dashed") +
+        labs(title = feature, x = "AUC", y = "Count") +
+        theme_classic() +
+        theme(legend.position = "none")
+    return(p)
+}
