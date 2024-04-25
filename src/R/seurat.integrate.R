@@ -37,317 +37,8 @@ library('Seurat')
 library('clusterProfiler')
 library('org.Hs.eg.db')
 
-# options
-options(mc.cores = 8)
-options(future.globals.maxSize = 500 * 1024 ^ 3)
-
-# public variables
-ggsave <- function(...) suppressMessages(ggplot2::ggsave(...))
 WORKDIR <- fs::path(Sys.getenv("HOME"), "workspace", "gbm")
-idx.full <- c("21B-603-5", "22F-10823-3", "22F-21576-1", "22F-23738-2")
-idx.list <- as.list(idx.full)
-names(idx.list) <- idx.full
 source(fs::path(WORKDIR, "src", "R", "utils.R"))
-
-save.dirs <- lapply(
-    idx.list,
-    function(idx) save.dir <- fs::path(WORKDIR, "results", idx)
-)
-save.dirs[["int"]] <- fs::path(WORKDIR, "results", "integrate")
-if (! fs::dir_exists(save.dirs[["int"]])) fs::dir_create(save.dirs[["int"]])
-
-OrgDb <- org.Hs.eg.db
-
-# public functions
-saveSeuratList <- function() {
-    saveRDS(seurat.list, fs::path(WORKDIR, "results", "seurat.list.rds"))
-}
-
-loadSeuratList <- function() {
-    seurat.list <<- readRDS(fs::path(WORKDIR, "results", "seurat.list.rds"))
-}
-
-saveIntegrate <- function() {
-    saveRDS(integrate.obj, fs::path(WORKDIR, "results", "integrate.rds"))
-}
-
-loadIntegrate <- function() {
-    integrate.obj <<- readRDS(fs::path(WORKDIR, "results", "integrate.rds"))
-}
-
-# %% enrichment functions
-enrichmentFindAllMarkers <- function(cluster, markers, save.dir) {
-    upscale.table <- markers %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > 0)
-    downscale.table <- markers %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC < 0)
-    upscale.genes <- upscale.table[upscale.table$cluster == cluster, ]$gene
-    upscale.genes <- upscale.genes[!grepl("^DEPRECATED-", upscale.genes)]
-    downscale.genes <- downscale.table[downscale.table$cluster == cluster, ]$gene
-    downscale.genes <- downscale.genes[!grepl("^DEPRECATED-", downscale.genes)]
-    if ((length(upscale.genes) <= 0) || (length(downscale.genes) <= 0)) {
-        print(paste(idx, cluster))
-        next
-    }
-
-    save.dir.go <- fs::path(save.dir, "GO")
-    if (! fs::dir_exists(save.dir.go)) fs::dir_create(save.dir.go)
-    upscale.ego <- enrichGO(
-        upscale.genes,
-        OrgDb = OrgDb,
-        keyType = "SYMBOL",
-        ont = "ALL",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    downscale.ego <- enrichGO(
-        downscale.genes,
-        OrgDb = OrgDb,
-        keyType = "SYMBOL",
-        ont = "ALL",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    p1 <- dotplot(upscale.ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment for log2FC > 0 genes")
-    p2 <- dotplot(downscale.ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment for log2FC < 0 genes")
-    cluster <- stringr::str_replace_all(cluster, " ", "_")
-    ggsave(
-        fs::path(save.dir.go, paste(cluster, "GO.pdf", sep = ".")),
-        p1 + p2,
-        width = 14,
-        height = 15
-    )
-    write.xlsx2(
-        as.data.frame(upscale.ego),
-        fs::path(save.dir.go, paste(cluster, "GO.xlsx", sep = ".")),
-        sheetName = "avg_log2FC > 0"
-    )
-    write.xlsx2(
-        as.data.frame(downscale.ego),
-        fs::path(save.dir.go, paste(cluster, "GO.xlsx", sep = ".")),
-        sheetName = "avg_log2FC < 0",
-        append = TRUE
-    )
-
-    save.dir.kegg <- fs::path(save.dir, "KEGG")
-    if (! fs::dir_exists(save.dir.kegg)) fs::dir_create(save.dir.kegg)
-    upscale.ids <- mapIds(
-        OrgDb, keys = upscale.genes, column = "ENTREZID", keytype = "SYMBOL")
-    downscale.ids <- mapIds(
-        OrgDb, keys = downscale.genes, column = "ENTREZID", keytype = "SYMBOL")
-    upscale.kk <- enrichKEGG(
-        upscale.ids,
-        organism = "hsa",
-        keyType = "ncbi-geneid",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    downscale.kk <- enrichKEGG(
-        downscale.ids,
-        organism = "hsa",
-        keyType = "ncbi-geneid",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    if (dim(upscale.kk)[1] > 0) {
-        p1 <- dotplot(upscale.kk) +
-            ggtitle("KEGG Enrichment for log2FC > 0 genes")
-        write.xlsx2(
-            as.data.frame(upscale.kk),
-            fs::path(
-                save.dir.kegg,
-                paste(cluster, "KEGG.xlsx", sep = ".")
-                ),
-            sheetName = "avg_log2FC > 0"
-        )
-    } else {
-        p1 <- NULL
-    }
-    if (dim(downscale.kk)[1] > 0) {
-        p2 <- dotplot(downscale.kk) +
-            ggtitle("KEGG Enrichment for log2FC < 0 genes")
-        write.xlsx2(
-            as.data.frame(downscale.kk),
-            fs::path(
-                save.dir.kegg,
-                paste(cluster, "KEGG.xlsx", sep = ".")
-            ),
-            sheetName = "avg_log2FC < 0",
-            append = TRUE
-        )
-    } else {
-        p2 <- NULL
-    }
-    ggsave(
-        fs::path(save.dir.kegg, paste(cluster, "KEGG.pdf", sep = ".")),
-        p1 + p2,
-        width = 14
-    )
-}
-
-enrichmentFindMarkers <- function(markers, save.dir) {
-    upscale.table <- markers %>%
-        filter(p_val_adj < 0.05, avg_log2FC > 0)
-    downscale.table <- markers %>%
-        filter(p_val_adj < 0.05, avg_log2FC < 0)
-    upscale.genes <- rownames(upscale.table)
-    upscale.genes <- upscale.genes[!grepl("^DEPRECATED-", upscale.genes)]
-    downscale.genes <- rownames(downscale.table)
-    downscale.genes <- downscale.genes[!grepl("^DEPRECATED-", downscale.genes)]
-
-    save.dir.go <- fs::path(save.dir, "GO")
-    if (! fs::dir_exists(save.dir.go)) fs::dir_create(save.dir.go)
-
-    upscale.ego <- enrichGO(
-        upscale.genes,
-        OrgDb = OrgDb,
-        keyType = "SYMBOL",
-        ont = "ALL",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    downscale.ego <- enrichGO(
-        downscale.genes,
-        OrgDb = OrgDb,
-        keyType = "SYMBOL",
-        ont = "ALL",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    p1 <- dotplot(upscale.ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment for log2FC > 0 genes")
-    p2 <- dotplot(downscale.ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment for log2FC < 0 genes")
-    ggsave(
-        fs::path(save.dir.go, "GO.pdf"),
-        p1 + p2,
-        width = 14,
-        height = 15
-    )
-    write.xlsx2(
-        as.data.frame(upscale.ego),
-        fs::path(save.dir.go, "GO.xlsx"),
-        sheetName = "avg_log2FC > 0"
-    )
-    write.xlsx2(
-        as.data.frame(downscale.ego),
-        fs::path(save.dir.go, "GO.xlsx"),
-        sheetName = "avg_log2FC < 0",
-        append = TRUE
-    )
-
-    save.dir.kegg <- fs::path(save.dir, "KEGG")
-    if (! fs::dir_exists(save.dir.kegg)) fs::dir_create(save.dir.kegg)
-    upscale.ids <- mapIds(
-        OrgDb, keys = upscale.genes, column = "ENTREZID", keytype = "SYMBOL")
-    downscale.ids <- mapIds(
-        OrgDb, keys = downscale.genes, column = "ENTREZID", keytype = "SYMBOL")
-    upscale.kk <- enrichKEGG(
-        upscale.ids,
-        organism = "hsa",
-        keyType = "ncbi-geneid",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    downscale.kk <- enrichKEGG(
-        downscale.ids,
-        organism = "hsa",
-        keyType = "ncbi-geneid",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    if (dim(upscale.kk)[1] > 0) {
-        p1 <- dotplot(upscale.kk) +
-            ggtitle("KEGG Enrichment for log2FC > 0 genes")
-        write.xlsx2(
-            as.data.frame(upscale.kk),
-            fs::path(save.dir.kegg, "KEGG.xlsx"),
-            sheetName = "avg_log2FC > 0"
-        )
-    } else {
-        p1 <- NULL
-    }
-    if (dim(downscale.kk)[1] > 0) {
-        p2 <- dotplot(downscale.kk) +
-            ggtitle("KEGG Enrichment for log2FC < 0 genes")
-        write.xlsx2(
-            as.data.frame(downscale.kk),
-            fs::path(save.dir.kegg, "KEGG.xlsx"),
-            sheetName = "avg_log2FC < 0",
-            append = TRUE
-        )
-    } else {
-        p2 <- NULL
-    }
-    ggsave(fs::path(save.dir.kegg, "KEGG.pdf"), p1 + p2, width = 14)
-}
-
-enrichmentGenelist <- function(markers, save.dir) {
-    if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-    markers <- markers[!grepl("^DEPRECATED-", markers)]
-
-    save.dir.go <- fs::path(save.dir, "GO")
-    if (! fs::dir_exists(save.dir.go)) fs::dir_create(save.dir.go)
-
-    ego <- enrichGO(
-        markers,
-        OrgDb = OrgDb,
-        keyType = "SYMBOL",
-        ont = "ALL",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    p <- dotplot(ego, split = "ONTOLOGY") +
-        facet_grid(ONTOLOGY~., scale = "free") +
-        ggtitle("GO Enrichment")
-    ggsave(fs::path(save.dir.go, "GO.pdf"), p, height = 15)
-    write.xlsx2(
-        as.data.frame(ego),
-        fs::path(save.dir.go, "GO.xlsx"),
-        sheetName = "GO"
-    )
-
-    save.dir.kegg <- fs::path(save.dir, "KEGG")
-    if (! fs::dir_exists(save.dir.kegg)) fs::dir_create(save.dir.kegg)
-    ids <- mapIds(
-        OrgDb, keys = markers, column = "ENTREZID", keytype = "SYMBOL")
-    kk <- enrichKEGG(
-        ids,
-        organism = "hsa",
-        keyType = "ncbi-geneid",
-        pvalueCutoff = 0.05,
-        pAdjustMethod = "BH",
-        qvalueCutoff = 0.1
-    )
-    if (dim(kk)[1] > 0) {
-        p <- dotplot(kk) + ggtitle("KEGG Enrichment")
-        write.xlsx2(
-            as.data.frame(kk),
-            fs::path(save.dir.kegg, "KEGG.xlsx"),
-            sheetName = "KEGG"
-        )
-    } else {
-        p <- NULL
-    }
-    ggsave(fs::path(save.dir.kegg, "KEGG.pdf"), p)
-}
 
 # %% integrate data
 loadSeuratList()
@@ -383,7 +74,7 @@ integrateData <- function(seurat.list) {
         seurat.list,
         anchor.features = integrate.features,
         normalization.method = "SCT",
-        k.anchor = 10,
+        k.anchor = 5,
         dims = 1:20,
         verbose = FALSE
     )
@@ -407,9 +98,9 @@ integrateData <- function(seurat.list) {
     return(integrate.obj)
 }
 integrate.obj <- integrateData(seurat.list)
-saveIntegrate()
+#saveIntegrate()
 
-# %% annotation
+# annotation
 regionAnnotation <- function(seurat.obj) {
     region.annotations <- list(
         "21B-603-5.4" = "Blood vessel rich tumor area",
@@ -643,10 +334,6 @@ differentialExpression4.2 <- function(integrate.obj) {
     ggsave(fs::path(save.dir, "差异热图.pdf"), p)
     return(markers)
 }
-markers.list4.2 <- read.csv(
-    fs::path(save.dirs[["int"]], "GBM22F-21576-1密集vsIV癌旁", "差异表格.csv"),
-    row.names = 1
-)
 markers.list4.2 <- differentialExpression4.2(integrate.obj)
 
 # %% 4.3 GBM 22F-23738-2 密集 vs IV 癌旁
@@ -681,10 +368,6 @@ differentialExpression4.3 <- function(integrate.obj) {
     ggsave(fs::path(save.dir, "差异热图.pdf"), p)
     return(markers)
 }
-markers.list4.3 <- read.csv(
-    fs::path(save.dirs[["int"]], "GBM22F-23738-2密集vsIV癌旁", "差异表格.csv"),
-    row.names = 1
-)
 markers.list4.3 <- differentialExpression4.3(integrate.obj)
 
 # %% 4.4 IV 密集 vs IV 癌旁
@@ -844,7 +527,7 @@ acquireSetList <- function() {
     enrichmentGenelist(set3.up, fs::path(set.dir, "集合3集合1+集合2上调"))
     enrichmentGenelist(set3.down, fs::path(set.dir, "集合3集合1+集合2下调"))
 
-    return.list = list(
+    return.list <- list(
         "set1" = list("up" = set1.up, "down" = set1.down),
         "set2" = list("up" = set2.up, "down" = set2.down),
         "set3" = list("up" = set3.up, "down" = set3.down),

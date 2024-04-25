@@ -39,37 +39,8 @@ library('Seurat')
 library('clusterProfiler')
 library('org.Hs.eg.db')
 
-# options
-options(mc.cores = 10)
-options(future.globals.maxSize = 500 * 1024 ^ 3)
-future::plan("multicore", workers = 1)
-
-# public variables
-ggsave <- function(...) suppressMessages(ggplot2::ggsave(...))
 WORKDIR <- fs::path(Sys.getenv("HOME"), "workspace", "gbm")
-idx.full <- c("21B-603-5", "22F-10823-3", "22F-21576-1", "22F-23738-2")
-idx.list <- as.list(idx.full)
-names(idx.list) <- idx.full
-
-save.dirs <- lapply(
-    idx.list,
-    function(idx) {
-        save.dir <- fs::path(WORKDIR, "results", idx)
-        if (! fs::dir_exists(save.dir)) fs::dir_create(save.dir)
-        return(save.dir)
-    }
-)
-
-OrgDb <- org.Hs.eg.db
-
-# public functions
-saveSeuratList <- function() {
-    saveRDS(seurat.list, fs::path(WORKDIR, "results", "seurat.list.rds"))
-}
-
-loadSeuratList <- function() {
-    seurat.list <<- readRDS(fs::path(WORKDIR, "results", "seurat.list.rds"))
-}
+source(fs::path(WORKDIR, "src", "R", "utils.R"))
 
 # %% read data
 readData <- function(idx) {
@@ -134,8 +105,10 @@ finalCluster <- function(seurat.obj) {
     resolutions <- list(
         "21B-603-5" = 0.15,
         "22F-10823-3" = 0.18,
-        "22F-21576-1" = 0.14,
-        "22F-23738-2" = 0.11
+        #"22F-21576-1" = 0.14,
+        #"22F-23738-2" = 0.11
+        "22F-21576-1" = 0.2,
+        "22F-23738-2" = 0.2
     )
     seurat.obj <- FindClusters(
         seurat.obj, verbose = FALSE, resolution = resolutions[[idx]])
@@ -149,6 +122,20 @@ finalCluster <- function(seurat.obj) {
 }
 seurat.list <- mclapply(seurat.list, finalCluster)
 saveSeuratList()
+
+# %% save expression matrix
+saveExpression <- function(seurat.obj) {
+    idx <- names(seurat.obj@images)
+    DefaultAssay(seurat.obj) <- "Spatial"
+    expression.df <- GetAssayData(
+        seurat.obj, slot = "count", assay = "Spatial"
+    ) %>% t()
+    write.csv(
+        expression.df,
+        fs::path(WORKDIR, "Data", "counts", paste0(idx, ".csv"))
+    )
+}
+mclapply(seurat.list, saveExpression)
 
 # %% annotation
 regionAnnotation <- function(seurat.obj) {
@@ -700,319 +687,16 @@ differentialExpression4 <- function(seurat.obj) {
 
 markers.list4 <- mclapply(seurat.list, differentialExpression4)
 
-# %% read DE 1
-differentialExpression1 <- function(seurat.obj) {
-    idx <- names(seurat.obj@images)
-    read.path <- fs::path(save.dirs[[idx]], paste0(idx, ".分区域差异表达.csv"))
-    markers <- read.csv(read.path, row.names = 1)
-    markers$cluster <- factor(
-        markers$cluster,
-        levels = levels(Idents(seurat.obj))
-    )
-    return(markers)
-}
-markers.list1 <- mclapply(seurat.list, differentialExpression1)
-
-# %% kinase
-kinase.df <- jsonlite::fromJSON(fs::path(WORKDIR, "Data", "klifs.net.json"))
-drawKinase <- function(seurat.obj) {
-    idx <- names(seurat.obj@images)
-
-    marker.genes <- markers.list1[[idx]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% kinase.df$name)
-
-    write.csv(
-        marker.genes,
-        fs::path(save.dirs[[idx]], paste(idx, "激酶表达.csv", sep = "."))
-    )
-
-
-    p <- DoHeatmap(seurat.obj, features = marker.genes$gene)
-    save.path <- fs::path(
-        save.dirs[[idx]], paste(idx, "激酶表达.pdf", sep = ".")
-    )
-    ggsave(save.path, p, height = 20, width = 15)
-}
-mclapply(seurat.list, drawKinase)
-
 # %%
-kinase.df <- jsonlite::fromJSON(fs::path(WORKDIR, "Data", "klifs.net.json"))
-drawKinaseTogether <- function(idx, level) {
-    marker.genes.1 <- markers.list1[[idx[1]]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% kinase.df$name)
-    marker.genes.2 <- markers.list1[[idx[2]]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% kinase.df$name)
-    marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
-        group_by(cluster)
-    draw.genes <- unique(marker.genes$gene)
-    draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
-
-    p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
-    p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
-    p <- p1 + p2
-    save.path <- fs::path(
-        WORKDIR, "results", "基因列表", paste0(level, "激酶表达.1.pdf"))
-    ggsave(save.path, p, height = 20, width = 30)
-
-    draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
-    p <- DoHeatmap(draw.seurat, features = draw.genes)
-    save.path <- fs::path(
-        WORKDIR, "results", "基因列表", paste0(level, "激酶表达.2.pdf"))
-    ggsave(save.path, p, height = 20, width = 15)
-}
-drawKinaseTogether(c(idx.full[1], idx.full[2]), "IV")
-drawKinaseTogether(c(idx.full[3], idx.full[4]), "GBM")
-
-# %% ubiquitin
-flag <- TRUE
-for (ubi in c("E1", "E2", "E3")) {
-    df.path <- fs::path(WORKDIR, "Data", "iuucd", paste0("ALL_", ubi, ".txt"))
-    read.df <- read.table(df.path, sep = "\t")
-    read.df$V6 <- sapply(strsplit(read.df$V4, ";  "), function(x) return(x[1]))
-    if (flag) {
-        ubiquitin.df <- read.df
-        flag <- FALSE
-    } else {
-        ubiquitin.df <- rbind(ubiquitin.df, read.df)
-    }
-}
-drawUbiquitin <- function(seurat.obj) {
-    idx <- names(seurat.obj@images)
-
-    marker.genes <- markers.list1[[idx]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% ubiquitin.df$V6)
-
-    write.csv(
-        marker.genes,
-        fs::path(save.dirs[[idx]], paste(idx, "泛素表达.csv", sep = "."))
-    )
-
-    p <- DoHeatmap(seurat.obj, features = marker.genes$gene)
-    save.path <- fs::path(
-        save.dirs[[idx]], paste(idx, "泛素表达.pdf", sep = ".")
-    )
-    ggsave(save.path, p, height = 20, width = 15)
-}
-mclapply(seurat.list, drawUbiquitin)
-
-# %%
-drawUbiquitinTogether <- function(idx, level) {
-    marker.genes.1 <- markers.list1[[idx[1]]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% ubiquitin.df$V6)
-    marker.genes.2 <- markers.list1[[idx[2]]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% ubiquitin.df$V6)
-
-    marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
-        group_by(cluster)
-    draw.genes <- unique(marker.genes$gene)
-    draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
-
-    p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
-    p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
-    p <- p1 + p2
-    save.path <- fs::path(
-        WORKDIR, "results", "基因列表", paste0(level, "泛素表达.1.pdf"))
-    ggsave(save.path, p, height = 20, width = 30)
-
-    draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
-    p <- DoHeatmap(draw.seurat, features = draw.genes)
-    save.path <- fs::path(
-        WORKDIR, "results", "基因列表", paste0(level, "泛素表达.2.pdf"))
-    ggsave(save.path, p, height = 20, width = 15)
-}
-drawUbiquitinTogether(c(idx.full[1], idx.full[2]), "IV")
-drawUbiquitinTogether(c(idx.full[3], idx.full[4]), "GBM")
-
-# %% TF
-tf.df <- read.csv(fs::path(WORKDIR, "Data", "DatabaseExtract_v_1.01.csv"))
-tf.df <- filter(tf.df, TF.assessment == "Known motif")
-drawTF <- function(seurat.obj) {
-    idx <- names(seurat.obj@images)
-
-    marker.genes <- markers.list1[[idx]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% tf.df$HGNC.symbol)
-
-    write.csv(
-        marker.genes,
-        fs::path(save.dirs[[idx]], paste(idx, "转录因子表达.csv", sep = "."))
-    )
-
-    p <- DoHeatmap(seurat.obj, features = marker.genes$gene)
-    save.path <- fs::path(
-        save.dirs[[idx]], paste(idx, "转录因子表达.pdf", sep = ".")
-    )
-    ggsave(save.path, p, height = 20, width = 15)
-}
-mclapply(seurat.list, drawTF)
-
-# %%
-drawTFTogether <- function(idx, level) {
-    marker.genes.1 <- markers.list1[[idx[1]]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% tf.df$HGNC.symbol)
-    marker.genes.2 <- markers.list1[[idx[2]]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% tf.df$HGNC.symbol)
-
-    marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
-        group_by(cluster)
-    draw.genes <- unique(marker.genes$gene)
-    draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
-
-    p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
-    p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
-    p <- p1 + p2
-    save.path <- fs::path(
-        WORKDIR, "results", "基因列表", paste0(level, "转录因子表达.1.pdf"))
-    ggsave(save.path, p, height = 20, width = 30)
-
-    draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
-    p <- DoHeatmap(draw.seurat, features = draw.genes)
-    save.path <- fs::path(
-        WORKDIR, "results", "基因列表", paste0(level, "转录因子表达.2.pdf"))
-    ggsave(save.path, p, height = 20, width = 15)
-}
-drawTFTogether(c(idx.full[1], idx.full[2]), "IV")
-drawTFTogether(c(idx.full[3], idx.full[4]), "GBM")
-
-# %% RBP
-rbp.df <- read.csv(fs::path(WORKDIR, "Data", "cancers-751631-suppl-final.csv"))
-drawRBP <- function(seurat.obj) {
-    idx <- names(seurat.obj@images)
-
-    marker.genes <- markers.list1[[idx]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% rbp.df$ID)
-
-    write.csv(
-        marker.genes,
-        fs::path(save.dirs[[idx]], paste(idx, "RBP表达.csv", sep = "."))
-    )
-
-    p <- DoHeatmap(seurat.obj, features = marker.genes$gene)
-    save.path <- fs::path(
-        save.dirs[[idx]], paste(idx, "RBP表达.pdf", sep = ".")
-    )
-    ggsave(save.path, p, height = 30, width = 15)
-}
-mclapply(seurat.list, drawRBP)
-
-# %%
-drawRBPTogether <- function(idx, level) {
-    marker.genes.1 <- markers.list1[[idx[1]]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% rbp.df$ID)
-    marker.genes.2 <- markers.list1[[idx[2]]] %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-        arrange(desc(avg_log2FC), .by_group = TRUE) %>%
-        filter(gene %in% rbp.df$ID)
-
-    marker.genes <- rbind(marker.genes.1, marker.genes.2) %>%
-        group_by(cluster)
-    draw.genes <- unique(marker.genes$gene)
-    draw.genes <- intersect(marker.genes.1$gene, marker.genes.2$gene)
-
-    p1 <- DoHeatmap(seurat.list[[idx[1]]], features = draw.genes)
-    p2 <- DoHeatmap(seurat.list[[idx[2]]], features = draw.genes)
-    p <- p1 + p2
-    save.path <- fs::path(
-        WORKDIR, "results", "基因列表", paste0(level, "RBP表达.1.pdf"))
-    ggsave(save.path, p, height = 20, width = 30)
-
-    draw.seurat <- merge(seurat.list[[idx[1]]], seurat.list[[idx[2]]])
-    p <- DoHeatmap(draw.seurat, features = draw.genes)
-    save.path <- fs::path(
-        WORKDIR, "results", "基因列表", paste0(level, "RBP表达.2.pdf"))
-    ggsave(save.path, p, height = 20, width = 15)
-}
-drawRBPTogether(c(idx.full[1], idx.full[2]), "IV")
-drawRBPTogether(c(idx.full[3], idx.full[4]), "GBM")
-
-# %%
-differentialExpression5 <- function() {
-    markers.list5 <- list()
-    # iv 密集 vs. 瘤旁
-    idx <- "21B-603-5"
-    markers.list5[[idx]] <- FindMarkers(
-        seurat.list[[idx]],
-        ident.1 = "Tumor cell densely populated area",
-        ident.2 = "Parancerous area",
-        logfc.threshold = 0.1,
-        verbose = FALSE
-    )
-    idx <- "22F-10823-3"
-    markers.list5[[idx]] <- FindMarkers(
-        seurat.list[[idx]],
-        ident.1 = "Tumor cell densely populated area",
-        ident.2 = "Parancerous area",
-        logfc.threshold = 0.1,
-        verbose = FALSE
-    )
-    return(markers.list5)
-}
-markers.list5 <- differentialExpression5()
-
-# %%
-upgenes.1 <- rownames(
-    filter(markers.list5[[idx.full[1]]], avg_log2FC > 0.5, p_val_adj < 0.05))
-upgenes.2 <- rownames(
-    filter(markers.list5[[idx.full[2]]], avg_log2FC > 0.5, p_val_adj < 0.05))
-upgenes <- intersect(upgenes.1, upgenes.2)
-
-pdf(fs::path(WORKDIR, "results", "交集基因", "密集vs癌旁上调基因交集韦恩图.pdf"))
-ggvenn(list("21B-603-5" = upgenes.1, "22F-10823-3" = upgenes.2), idx.full[1:2])
-dev.off()
-
-p1 <- DoHeatmap(seurat.list[[idx.full[1]]], features = upgenes) + NoLegend()
-p2 <- DoHeatmap(seurat.list[[idx.full[2]]], features = upgenes) + NoLegend()
-ggsave(
-    fs::path(WORKDIR, "results", "交集基因", "密集vs癌旁上调基因交集热图.pdf"),
-    p1 + p2, width = 14, height = 10
+mclapply(
+    seurat.list, drawGenelist, gene.list = loadKinase(), save.name = "激酶表达"
 )
-
-downgenes.1 <- rownames(
-    filter(markers.list5[[idx.full[1]]], avg_log2FC < -0.5, p_val_adj < 0.05))
-downgenes.2 <- rownames(
-    filter(markers.list5[[idx.full[2]]], avg_log2FC < -0.5, p_val_adj < 0.05))
-downgenes <- intersect(downgenes.1, downgenes.2)
-
-p1 <- DoHeatmap(seurat.list[[idx.full[1]]], features = downgenes) + NoLegend()
-p2 <- DoHeatmap(seurat.list[[idx.full[2]]], features = downgenes) + NoLegend()
-ggsave(
-    fs::path(WORKDIR, "results", "交集基因", "密集vs癌旁下调基因交集热图.pdf"),
-    p1 + p2, width = 14, height = 10
+mclapply(
+    seurat.list, drawGenelist, gene.list = loadUbiquitin(), save.name = "泛素表达"
 )
-
-pdf(fs::path(WORKDIR, "results", "交集基因", "密集vs癌旁下调基因交集韦恩图.pdf"))
-ggvenn(list("21B-603-5" = downgenes.1, "22F-10823-3" = downgenes.2), idx.full[1:2])
-dev.off()
+mclapply(
+    seurat.list, drawGenelist, gene.list = loadTF(), save.name = "转录因子表达"
+)
+mclapply(
+    seurat.list, drawGenelist, gene.list = loadRBP(), save.name = "RBP表达"
+)
