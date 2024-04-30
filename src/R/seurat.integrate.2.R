@@ -33,10 +33,12 @@ library('parallel')
 library('dplyr')
 library('xlsx')
 library('ggplot2')
+library('ggvenn')
 library('Seurat')
 library('clusterProfiler')
 library('ComplexHeatmap')
 library('org.Hs.eg.db')
+library('ggsci')
 
 WORKDIR <- fs::path(Sys.getenv("HOME"), "workspace", "gbm")
 source(fs::path(WORKDIR, "src", "R", "utils.R"))
@@ -161,6 +163,8 @@ regionAnnotation <- function(seurat.obj) {
         p,
         width = 40
     )
+
+    write.csv(Idents(seurat.obj), fs::path(WORKDIR, "results", "idents.csv"))
 
     return(seurat.obj)
 }
@@ -464,103 +468,268 @@ enrichmentFindMarkers(
     logfc.threshold = 1
 )
 
+# %% SCENIC
+runSCENIC <- function() {
+    #system(paste(fs::path(WORKDIR, "src", "scenic.sh"), "full-sct", sep = " "))
+    auc.df <- read.csv(
+        fs::path(WORKDIR, "results", "scenic", "full-sct.auc.csv"),
+        header = TRUE,
+        row.names = 1,
+        check.names = FALSE
+    ) %>% t()
+    auc.matrix <- as.matrix(auc.df)
+    colnames(auc.matrix) <- colnames(auc.df)
+    rownames(auc.matrix) <- rownames(auc.df)
+    auc.assay <- CreateAssayObject(data = auc.matrix)
+    integrate.obj[["SCENIC"]] <- auc.assay
+
+    bin.df <- read.csv(
+        fs::path(WORKDIR, "results", "scenic", "full-sct.bin.csv"),
+        header = TRUE,
+        row.names = 1,
+        check.names = FALSE
+    ) %>% t()
+    bin.matrix <- as.matrix(bin.df)
+    colnames(bin.matrix) <- colnames(bin.df)
+    rownames(bin.matrix) <- rownames(bin.df)
+    bin.assay <- CreateAssayObject(data = bin.matrix)
+    integrate.obj[["SCENIC.bin"]] <- bin.assay
+
+    rss.level.df <- read.csv(
+        fs::path(WORKDIR, "results", "scenic", "full-sct.rss_level.csv"),
+        header = TRUE,
+        row.names = 1,
+        check.names = FALSE
+    ) %>% t() %>% as.data.frame()
+    rss.level.df[is.na(rss.level.df)] <- 0
+
+    top.gbm <- rss.level.df %>%
+        arrange(desc(GBM)) %>%
+        top_n(n = 50, wt = GBM) %>%
+        rownames() %>%
+        gsub("\\(.*\\)", "", .)
+    top.gbm.plus <- paste0(top.gbm, "(+)")
+
+    top.iv <- rss.level.df %>%
+        arrange(desc(IV)) %>%
+        top_n(n = 50, wt = IV) %>%
+        rownames() %>%
+        gsub("\\(.*\\)", "", .)
+    top.iv.plus <- paste0(top.iv, "(+)")
+
+    auc.obj <- integrate.obj
+    DefaultAssay(auc.obj) <- "SCENIC"
+
+    p <- FeaturePlot(
+        auc.obj,
+        features = top.gbm.plus,
+        reduction = "tsne",
+        min.cutoff = 0,
+        max.cutoff = "q90",
+        ncol = 5
+    )
+    ggsave(
+        fs::path(WORKDIR, "results", "scenic-plot", "auc-gbm-tsne.pdf"),
+        p,
+        width = 25,
+        height = 50,
+        limitsize = FALSE
+    )
+
+    p <- FeaturePlot(
+        auc.obj,
+        features = top.iv.plus,
+        reduction = "tsne",
+        min.cutoff = 0,
+        max.cutoff = "q90",
+        ncol = 5
+    )
+    ggsave(
+        fs::path(WORKDIR, "results", "scenic-plot", "auc-iv-tsne.pdf"),
+        p,
+        width = 25,
+        height = 50,
+        limitsize = FALSE
+    )
+
+    auc.obj <- integrate.obj
+    DefaultAssay(auc.obj) <- "SCENIC.bin"
+    p <- FeaturePlot(
+        auc.obj,
+        features = top.gbm.plus,
+        reduction = "tsne",
+        cols = c("lightgrey", "red"),
+        min.cutoff = 0,
+        max.cutoff = 1,
+        ncol = 5
+    )
+    ggsave(
+        fs::path(WORKDIR, "results", "scenic-plot", "bin-gbm-tsne.pdf"),
+        p,
+        width = 25,
+        height = 50,
+        limitsize = FALSE
+    )
+
+    p <- FeaturePlot(
+        auc.obj,
+        features = top.iv.plus,
+        reduction = "tsne",
+        cols = c("lightgrey", "red"),
+        min.cutoff = 0,
+        max.cutoff = 1,
+        ncol = 5
+    )
+    ggsave(
+        fs::path(WORKDIR, "results", "scenic-plot", "bin-iv-tsne.pdf"),
+        p,
+        width = 25,
+        height = 50,
+        limitsize = FALSE
+    )
+
+    p <- FeaturePlot(
+        integrate.obj,
+        features = top.gbm,
+        reduction = "tsne",
+        min.cutoff = 0,
+        max.cutoff = "q90",
+        ncol = 5
+    )
+    ggsave(
+        fs::path(WORKDIR, "results", "scenic-plot", "expression-gbm-tsne.pdf"),
+        p,
+        width = 25,
+        height = 50,
+        limitsize = FALSE
+    )
+
+    p <- FeaturePlot(
+        integrate.obj,
+        features = top.iv,
+        reduction = "tsne",
+        min.cutoff = 0,
+        max.cutoff = "q90",
+        ncol = 5
+    )
+    ggsave(
+        fs::path(WORKDIR, "results", "scenic-plot", "expression-iv-tsne.pdf"),
+        p,
+        width = 25,
+        height = 50,
+        limitsize = FALSE
+    )
+
+    threshold.df <- read.csv(
+        fs::path(WORKDIR, "results", "scenic", "full-sct.threshold.csv"),
+        row.names = 1
+    )
+
+    save.dir <- fs::path(WORKDIR, "results", "scenic-plot", "iv")
+    if (!fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    for (gene in top.iv.plus) {
+        p <- histPlot(integrate.obj, gene, threshold.df)
+        ggsave(fs::path(save.dir, paste0(gene, ".pdf")))
+    }
+
+    save.dir <- fs::path(WORKDIR, "results", "scenic-plot", "gbm")
+    if (!fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    for (gene in top.gbm.plus) {
+        p <- histPlot(integrate.obj, gene, threshold.df)
+        ggsave(fs::path(save.dir, paste0(gene, ".pdf")))
+    }
+
+    top100.gbm <- rss.level.df %>%
+        arrange(desc(GBM)) %>%
+        top_n(n = 100, wt = GBM) %>%
+        rownames()
+
+    top100.iv <- rss.level.df %>%
+        arrange(desc(IV)) %>%
+        top_n(n = 100, wt = IV) %>%
+        rownames()
+
+    p <- ggvenn(
+        list("GBM Top 100 Regulon" = top100.gbm, "IV Top 100 Regulon" = top100.iv),
+        c("GBM Top 100 Regulon", "IV Top 100 Regulon")
+    )
+    ggsave(fs::path(WORKDIR, "results", "scenic-plot", "venn.pdf"), p)
+
+    except.spots <- c(
+        colnames(subset(auc.obj, idents = "Normal tissue adjacent to tumor area")),
+        colnames(subset(auc.obj, idents = "Junction area")),
+        colnames(subset(auc.obj, idents = "Blood vessel rich area"))
+    )
+    all.spots <- colnames(auc.obj)
+    tumor.spots <- all.spots[! all.spots %in% except.spots]
+    level <- as.vector(auc.obj[, tumor.spots]$level)
+    names(level) <- tumor.spots
+
+    tops <- c(
+        intersect(top100.gbm, top100.iv),
+        setdiff(top100.gbm, top100.iv),
+        setdiff(top100.iv, top100.gbm)
+    )
+
+    pdf(fs::path(WORKDIR, "results", "scenic-plot", "heatmap.pdf"), width = 21)
+    ha <- rowAnnotation(
+        level = level, col = list(level = c("IV" = "#ffff7f", "GBM" = "#7f7fff")))
+    ht <- Heatmap(
+        scale(t(auc.df[tops, tumor.spots])),
+        left_annotation = ha,
+        cluster_rows = FALSE,
+        cluster_columns = FALSE,
+        show_row_names = FALSE,
+        show_column_names = TRUE,
+        show_row_dend = FALSE,
+        show_column_dend = FALSE
+    )
+    draw(ht)
+    dev.off()
+}
+runSCENIC()
+
 # %%
-#system(paste(fs::path(WORKDIR, "src", "scenic.sh"), "full-sct", sep = " "))
-auc.df <- read.csv(
-    fs::path(WORKDIR, "results", "scenic", "full-sct.auc.csv"),
-    header = TRUE,
-    row.names = 1,
-    check.names = FALSE
-) %>% t()
-auc.matrix <- as.matrix(auc.df)
-colnames(auc.matrix) <- colnames(auc.df)
-rownames(auc.matrix) <- rownames(auc.df)
-auc.assay <- CreateAssayObject(data = auc.matrix)
-integrate.obj[["SCENIC"]] <- auc.assay
-
-bin.df <- read.csv(
-    fs::path(WORKDIR, "results", "scenic", "full-sct.bin.csv"),
-    header = TRUE,
-    row.names = 1,
-    check.names = FALSE
-) %>% t()
-bin.matrix <- as.matrix(bin.df)
-colnames(bin.matrix) <- colnames(bin.df)
-rownames(bin.matrix) <- rownames(bin.df)
-bin.assay <- CreateAssayObject(data = bin.matrix)
-integrate.obj[["SCENIC.bin"]] <- bin.assay
-
-significant.tfs <- markers.GBMvsIV %>%
-    filter(p_val_adj < 0.05, avg_log2FC > 0.5) %>%
-    rownames()
-scenic.tfs <- gsub("\\(.*\\)", "", rownames(auc.df))
-significant.tfs <- intersect(significant.tfs, scenic.tfs)
-significant.tfs.plus <- paste0(significant.tfs, "(+)")
-
-# %%
-p <- pDotPlot(
-    integrate.obj, features = significant.tfs.plus, assay = "SCENIC"
+gene.list <- list(
+    "ubiquitin" = loadUbiquitin(),
+    "rbp" = loadRBP(),
+    "kinase" = loadKinase()
 )
-ggsave(
-    fs::path(WORKDIR, "results", "scenic-plot", "auc-dotplot.pdf"),
-    p,
-    width = 21
+integrate.obj <- AddModuleScore(
+    integrate.obj,
+    gene.list,
+    assay = "integrated",
+    slot = "data",
+    name = names(gene.list),
+    search = TRUE,
+    verbose = FALSE,
+    timeout = 30
 )
-
-p <- pDotPlot(
-    integrate.obj, features = significant.tfs.plus, assay = "SCENIC.bin"
-)
-ggsave(
-    fs::path(WORKDIR, "results", "scenic-plot", "bin-dotplot.pdf"),
-    p,
-    width = 21
-)
-
-auc.obj <- integrate.obj
-DefaultAssay(auc.obj) <- "SCENIC"
-p <- FeaturePlot(
-    auc.obj,
-    features = significant.tfs.plus,
-    reduction = "tsne",
-    min.cutoff = 0,
-    max.cutoff = "q90",
-    ncol = 5
-)
-ggsave(
-    fs::path(WORKDIR, "results", "scenic-plot", "auc-tsne.pdf"),
-    p,
-    width = 25,
-    height = 40
-)
-
-auc.obj <- integrate.obj
-DefaultAssay(auc.obj) <- "SCENIC.bin"
-p <- FeaturePlot(
-    auc.obj,
-    features = significant.tfs.plus,
-    reduction = "tsne",
-    min.cutoff = 0,
-    max.cutoff = 1,
-    ncol = 5
-)
-ggsave(
-    fs::path(WORKDIR, "results", "scenic-plot", "bin-tsne.pdf"),
-    p,
-    width = 25,
-    height = 40
-)
-
 p <- FeaturePlot(
     integrate.obj,
-    features = significant.tfs,
+    features = c("ubiquitin1", "rbp2", "kinase3"),
     reduction = "tsne",
-    min.cutoff = 0,
-    max.cutoff = 1,
-    ncol = 5
+    max.cutoff = "q90",
+    min.cutoff = "q5",
+    cols = c("lightgrey", "darkgreen")
 )
-ggsave(
-    fs::path(WORKDIR, "results", "scenic-plot", "expression-tsne.pdf"),
-    p,
-    width = 25,
-    height = 40
+ggsave(fs::path(WORKDIR, "results", "module-score.pdf"), p, width = 14, height = 14)
+
+p <- SpatialFeaturePlot(
+    integrate.obj,
+    features = c("ubiquitin1", "rbp2", "kinase3")
 )
+ggsave(fs::path(WORKDIR, "results", "module-score.2.pdf"), p, width = 14, height = 14)
+
+p <- DotPlot(
+    integrate.obj,
+    features = c("ubiquitin1", "rbp2", "kinase3"),
+    scale = FALSE
+)
+p <- ggplot(p$data, aes(x = id, y = features.plot, fill = avg.exp.scaled)) +
+    geom_tile() +
+    coord_flip() +
+    theme(panel.grid = element_blank(), text = element_text(size = 20)) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+    scale_fill_gsea()
+ggsave(fs::path(WORKDIR, "results", "module-score.hm.pdf"), p, width = 8)

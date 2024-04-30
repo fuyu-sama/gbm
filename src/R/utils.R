@@ -68,7 +68,9 @@ loadIntegrate <- function() {
 
 loadKinase <- function() {
     kinase.df <- jsonlite::fromJSON(fs::path(WORKDIR, "Data", "klifs.net.json"))
-    return(kinase.df$name)
+    returns <- kinase.df$name
+    returns <- returns[!is.na(returns)]
+    return(returns)
 }
 
 loadUbiquitin <- function() {
@@ -84,18 +86,24 @@ loadUbiquitin <- function() {
             ubiquitin.df <- rbind(ubiquitin.df, read.df)
         }
     }
-    return(ubiquitin.df$V6)
+    returns <- ubiquitin.df$V6
+    returns <- returns[!is.na(returns)]
+    return(returns)
 }
 
 loadTF <- function() {
     tf.df <- read.csv(fs::path(WORKDIR, "Data", "DatabaseExtract_v_1.01.csv"))
     tf.df <- filter(tf.df, TF.assessment == "Known motif")
-    return(tf.df$HGNC.symbol)
+    returns <- tf.df$HGNC.symbol
+    returns <- returns[!is.na(returns)]
+    return(returns)
 }
 
 loadRBP <- function() {
     rbp.df <- read.csv(fs::path(WORKDIR, "Data", "cancers-751631-suppl-final.csv"))
-    return(rbp.df$ID)
+    returns <- rbp.df$ID
+    returns <- returns[!is.na(returns)]
+    return(returns)
 }
 
 drawGenelist <- function(seurat.obj, gene.list, save.name) {

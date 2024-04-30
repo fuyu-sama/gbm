@@ -50,6 +50,7 @@ thresholds.to_csv(
 # %% rss for GBM vs. IV
 idents_sub = idents[idents["x"] != "Normal tissue adjacent to tumor area"]
 idents_sub = idents_sub[idents_sub["x"] != "Junction area"]
+idents_sub = idents_sub[idents_sub["x"] != "Blood vessel rich area"]
 idents_sub["idx"] = [i.split("_")[0] for i in idents_sub.index]
 idents_sub["level"] = np.where(
     idents_sub["idx"].isin(["21B-603-5", "22F-10823-3"]),
