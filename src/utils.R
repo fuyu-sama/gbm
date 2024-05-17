@@ -484,7 +484,8 @@ pDotPlot <- function(...) {
         theme(panel.grid = element_blank(), text = element_text(size = 20)) +
         scale_color_gradient2(low = "blue", mid = "lightgrey", high =  "red") +
         labs(x = NULL, y = NULL) +
-        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+        theme(axis.text.x = element_text(face = "italic"))
     return(p)
 }
 
