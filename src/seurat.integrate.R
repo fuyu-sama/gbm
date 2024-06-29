@@ -145,348 +145,6 @@ regionAnnotation <- function(seurat.obj) {
 }
 integrate.obj <- regionAnnotation(integrate.obj)
 
-# %% draw RCTD
-drawRCTD <- function() {
-    FLAG <- 1
-    for (idx in idx.full) {
-        if (FLAG) {
-            rctd.results <- read.csv(
-                fs::path(save.dirs[[idx]], paste0(idx, ".rctd.csv")),
-                row.names = 1,
-                header = TRUE
-            )
-            rownames(rctd.results) <- paste(idx, rownames(rctd.results), sep = "_")
-            FLAG <- 0
-        } else {
-            read.results <- read.csv(
-                fs::path(save.dirs[[idx]], paste0(idx, ".rctd.csv")),
-                row.names = 1,
-                header = TRUE
-            )
-            rownames(read.results) <- paste(idx, rownames(read.results), sep = "_")
-            rctd.results <- rbind(rctd.results, read.results)
-        }
-    }
-
-    rctd.results <- rctd.results[colnames(integrate.obj), ]
-    rctd.results[is.na(rctd.results)] <- 0
-    integrate.obj$Immune <- rctd.results$Immune
-    integrate.obj$NormalBrain <- rctd.results$NormalBrain
-    integrate.obj$Tumor <- rctd.results$Tumour
-    integrate.obj$first_type <- rctd.results$first_type
-    integrate.obj$region <- Idents(integrate.obj)
-
-    p <- FeaturePlot(
-        integrate.obj,
-        features = c("NormalBrain", "Tumor", "Immune"),
-        max.cutoff = "q90",
-        ncol = 3,
-        reduction = "tsne"
-    )
-    ggsave(fs::path(WORKDIR, "results", "rctd.tsne.pdf"), width = 21, height = 7)
-
-    p <- RidgePlot(
-        integrate.obj,
-        features = c("NormalBrain", "Tumor", "Immune"),
-        cols = cols,
-        ncol = 3
-    )
-    ggsave(fs::path(WORKDIR, "results", "rctd.ridge.pdf"), width = 21, height = 10)
-
-    stack.df <- integrate.obj@meta.data[, c("first_type", "region")]
-    stack.df <- stack.df[stack.df$first_type != 0, ]
-    stack.df$number <- 1
-    stack.df <- plyr::ddply(
-        stack.df, "region", transform, percent = 1 / sum(number) * 100)
-    p <- ggplot(stack.df, aes(region, percent, fill = first_type)) +
-        geom_bar(stat = "identity", position = "stack") +
-        coord_flip() +
-        theme_bw()
-    ggsave(fs::path(WORKDIR, "results", "rctd.stack.pdf"), p)
-}
-drawRCTD()
-
-# %% de GBM vs. IV
-differentialExpressionIVvsGBM <- function() {
-    seurat.obj <- integrate.obj
-    names(seurat.obj@images) <- NULL
-    except.spots <- c(
-        colnames(subset(seurat.obj, idents = "Normal tissue adjacent to tumor area")),
-        colnames(subset(seurat.obj, idents = "Junction area")),
-        colnames(subset(seurat.obj, idents = "Blood vessel rich area"))
-    )
-    all.spots <- colnames(seurat.obj)
-    tumor.spots <- all.spots[! all.spots %in% except.spots]
-    seurat.obj <- seurat.obj[, tumor.spots]
-    markers <- FindMarkers(
-        seurat.obj,
-        min.pct = 0.3,
-        ident.1 = "GBM",
-        ident.2 = "IV",
-        group.by = "level"
-    )
-    write.csv(markers, fs::path(save.dirs[["int"]], "GBMvsIV", "markers.csv"))
-    return(markers)
-}
-markers.GBMvsIV <- differentialExpressionIVvsGBM()
-
-# %% enrichment GBM vs. IV
-enrichmentFindMarkers(
-    markers.GBMvsIV.sub,
-    fs::path(save.dirs[["int"]], "GBMvsIV"),
-    logfc.threshold = 0.5
-)
-
-# %%
-markers.table <- read.csv(
-    fs::path(save.dirs[["int"]], "GBMvsIV", "markers.csv"),
-    row.names = 1,
-    header = TRUE
-)
-go.table <- read.xlsx2(
-    fs::path(save.dirs[["int"]], "GBMvsIV", "GO", "GO.xlsx"),
-    sheetName = "upscale"
-)
-go.table$Count <- as.numeric(go.table$Count)
-write.xlsx2(go.table, "GO-GBMvsIV.xlsx", sheetName = "GO")
-pathways <- c(
-    "cell growth",
-    "DNA-binding transcription factor binding",
-    "ubiquitin-like protein ligase binding",
-    "negative regulation of phosphorylation"
-)
-for (pathway in pathways) {
-    genes <- go.table[go.table$Description == pathway, "geneID"]
-    genes <- strsplit(genes, "/")[[1]]
-    write.xlsx2(
-        markers.table[genes, ],
-        "GO-GBMvsIV.xlsx",
-        sheetName = pathway,
-        append = TRUE
-    )
-}
-
-# %% draw GBM vs. IV
-drawGBMvsIV <- function() {
-    markers.GBMvsIV.sub <- markers.GBMvsIV %>%
-        filter(p_val_adj < 0.05) %>%
-        filter(pct.1 > 0.3, pct.2 > 0.3)
-
-    tops <- markers.GBMvsIV.sub %>%
-        filter(p_val_adj < 0.05) %>%
-        arrange(desc(avg_log2FC)) %>%
-        top_n(n = 50, wt = avg_log2FC) %>%
-        rownames()
-    bottoms <- markers.GBMvsIV.sub %>%
-        filter(p_val_adj < 0.05) %>%
-        arrange(desc(avg_log2FC)) %>%
-        top_n(n = -50, wt = avg_log2FC) %>%
-        rownames()
-    p <- FeaturePlot(
-        integrate.obj,
-        features = tops,
-        reduction = "tsne",
-        min.cutoff = 0,
-        max.cutoff = "q90",
-        ncol = 5
-    )
-    ggsave(
-        fs::path(save.dirs[["int"]], "GBMvsIV", "tops.pdf"),
-        p,
-        width = 25,
-        height = 40
-    )
-    p <- FeaturePlot(
-        integrate.obj,
-        features = bottoms,
-        reduction = "tsne",
-        min.cutoff = 0,
-        max.cutoff = "q90",
-        ncol = 5
-    )
-    ggsave(
-        fs::path(save.dirs[["int"]], "GBMvsIV", "bottoms.pdf"),
-        p,
-        width = 25,
-        height = 40
-    )
-
-    p <- DoHeatmap(integrate.obj, features = c(tops, bottoms), group.by = "level")
-    ggsave(fs::path(save.dirs[["int"]], "GBMvsIV", "heatmap.pdf"), p)
-
-    p <- ggvolcano(markers.GBMvsIV)
-    ggsave(fs::path(save.dirs[["int"]], "GBMvsIV", "volcano.pdf"), p)
-}
-drawGBMvsIV()
-
-# %% draw GBM vs. IV dotplot
-drawGBMvsIVdotplot <- function() {
-    tumor.obj <- integrate.obj
-    names(tumor.obj@images) <- NULL
-    except.spots <- c(
-        colnames(subset(tumor.obj, idents = "Normal tissue adjacent to tumor area")),
-        colnames(subset(tumor.obj, idents = "Junction area")),
-        colnames(subset(tumor.obj, idents = "Blood vessel rich area"))
-    )
-    all.spots <- colnames(tumor.obj)
-    tumor.spots <- all.spots[! all.spots %in% except.spots]
-    tumor.obj <- tumor.obj[, tumor.spots]
-
-    genes <- c(
-        "HAMP", "CXCR4", "ENO1", "HSPA1B", "BTG1", "HSP90AA1", "HSP90AB1",
-        "NEDD4L", "GNG4", "CRABP2", "SRF", "TRIM32", "NAIF1", "TMEM108",
-        "TGFBR2", "MAPT", "MTOR", "PLXNA4", "DAB2", "FN1", "NRCAM", "SESN2",
-        "TNC", "ANAPC2", "GJA1", "TP53", "PLXNA1", "AUTS2", "HSPA1A", "DDX3X"
-    )
-    genes <- c("BTG1", "TNC", "ANAPC2", "TP53", "TRIM32")
-    p <- DotPlot(
-        tumor.obj,
-        features = genes,
-        group.by = "level",
-        scale = FALSE,
-        col.max = 8,
-        col.min = 0) +
-        theme(axis.text.x = element_text(
-                angle = 90, vjust = 0.5, hjust = 1, face = "italic"))
-    ggsave(
-        fs::path(save.dirs[["int"]], "GBMvsIV", "dotplot-.pdf"),
-        p, width = 10, height = 4
-    )
-}
-drawGBMvsIVdotplot()
-
-# %% find all markers
-markers.path <- fs::path(save.dirs[["int"]], "markers.csv")
-markers <- FindAllMarkers(integrate.obj, verbose = TRUE)
-write.csv(markers, markers.path)
-markers <- read.csv(markers.path, header = TRUE, row.names = 1)
-
-# %%
-tops <- markers %>%
-    filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
-    group_by(cluster) %>%
-    top_n(n = 10, wt = avg_log2FC)
-for (cluster in unique(tops$cluster)) {
-    genes <- tops[tops$cluster == cluster, ]$gene
-    p <- SpatialFeaturePlot(integrate.obj, features = genes, ncol = 4)
-    ggsave(
-        fs::path(WORKDIR, paste0(cluster, "-spatial.pdf")),
-        p, width = 20, height = 50, limitsize = FALSE
-    )
-}
-
-# %% draw all markers
-drawFindAllMarkers <- function() {
-    tops <- markers %>%
-        group_by(cluster) %>%
-        filter(p_val_adj < 0.05) %>%
-        top_n(n = 20, wt = avg_log2FC)
-
-    p <- DoHeatmap(integrate.obj, features = tops$gene) + NoLegend()
-    ggsave(fs::path(save.dirs[["int"]], "heatmap.pdf"), p)
-
-    for (cluster in unique(tops$cluster)) {
-        tops.sub <- tops[tops$cluster == cluster, ]
-        p <- FeaturePlot(
-            integrate.obj,
-            features = tops.sub$gene,
-            reduction = "tsne",
-            min.cutoff = 0,
-            max.cutoff = "q90",
-            ncol = 5
-        )
-        ggsave(
-            fs::path(save.dirs[["int"]], paste0(cluster, ".top10.tsne.pdf")),
-            p,
-            width = 40,
-            height = 28
-        )
-    }
-
-    genes <- c(
-        "PROM1", "CD44", "FUT4", "CD70", "S100A4", "ALDH1A3", "POU5F1", "SOX2")
-    genes <- c(
-        "IDH1", "IDH2", "EGFR", "TERT", "TP53", "MYCN", "PTPRZ1", "PDGFRA",
-        "MGMT", "CD24", "SOX4", "FERMT1"
-    )
-    for (gene in genes) {
-        p <- FeaturePlot(
-            integrate.obj,
-            features = gene,
-            reduction = "tsne",
-            min.cutoff = 0,
-            max.cutoff = "q90"
-        )
-        ggsave(
-            fs::path(save.dirs[["int"]], "expression", paste0(gene, ".tsne.pdf")), p)
-    }
-}
-drawFindAllMarkers()
-
-# %% enrichment find all markers
-sapply(
-    unique(markers$cluster),
-    enrichmentFindAllMarkers,
-    markers = markers,
-    save.dir = save.dirs[["int"]]
-)
-
-# %% iv dens vs. nat
-markers.iv <- FindMarkers(
-    integrate.obj,
-    ident.1 = "IV Tumor cell densely populated area",
-    ident.2 = "Normal tissue adjacent to tumor area"
-)
-markers.iv.path <- fs::path(save.dirs[["int"]], "IV", "markers.csv")
-write.csv(markers.iv, markers.iv.path)
-
-tops <- markers.iv %>%
-    filter(p_val_adj < 0.05) %>%
-    top_n(n = 50, wt = avg_log2FC) %>%
-    rownames()
-p <- FeaturePlot(
-    integrate.obj,
-    features = tops,
-    reduction = "tsne",
-    min.cutoff = 0,
-    max.cutoff = "q90",
-    ncol = 5
-)
-ggsave(
-    fs::path(save.dirs[["int"]], "IV", "tops.pdf"),
-    p,
-    width = 25,
-    height = 40
-)
-
-bottoms <- markers.iv %>%
-    filter(p_val_adj < 0.05) %>%
-    top_n(n = -50, wt = avg_log2FC) %>%
-    rownames()
-p <- FeaturePlot(
-    integrate.obj,
-    features = bottoms,
-    reduction = "tsne",
-    min.cutoff = 0,
-    max.cutoff = "q90",
-    ncol = 5
-)
-ggsave(
-    fs::path(save.dirs[["int"]], "IV", "bottoms.pdf"),
-    p,
-    width = 25,
-    height = 40
-)
-
-markers.iv.sub <- markers.iv %>%
-    filter(p_val_adj < 0.05) %>%
-    arrange(desc(avg_log2FC))
-enrichmentFindMarkers(
-    markers.iv.sub,
-    fs::path(save.dirs[["int"]], "IV"),
-    logfc.threshold = 1
-)
-
 # %% SCENIC
 runSCENIC <- function() {
     system(paste(fs::path(WORKDIR, "src", "scenic.sh"), "full-sct", sep = " "))
@@ -495,7 +153,7 @@ runSCENIC <- function() {
         header = TRUE,
         row.names = 1,
         check.names = FALSE
-    ) %>% t()
+        ) %>% t()
     auc.matrix <- as.matrix(auc.df)
     colnames(auc.matrix) <- colnames(auc.df)
     rownames(auc.matrix) <- rownames(auc.df)
@@ -507,7 +165,7 @@ runSCENIC <- function() {
         header = TRUE,
         row.names = 1,
         check.names = FALSE
-    ) %>% t()
+        ) %>% t()
     bin.matrix <- as.matrix(bin.df)
     colnames(bin.matrix) <- colnames(bin.df)
     rownames(bin.matrix) <- rownames(bin.df)
@@ -519,7 +177,7 @@ runSCENIC <- function() {
         header = TRUE,
         row.names = 1,
         check.names = FALSE
-    ) %>% t() %>% as.data.frame()
+        ) %>% t() %>% as.data.frame()
     rss.level.df[is.na(rss.level.df)] <- 0
 
     top.gbm <- rss.level.df %>%
@@ -708,319 +366,352 @@ runSCENIC <- function() {
 }
 runSCENIC()
 
-# %%
-gene.list <- list(
-    "ubiquitin" = loadUbiquitin(),
-    "rbp" = loadRBP(),
-    "kinase" = loadKinase()
-)
-integrate.obj <- AddModuleScore(
-    integrate.obj,
-    gene.list,
-    assay = "integrated",
-    slot = "data",
-    name = names(gene.list),
-    search = TRUE,
-    verbose = FALSE,
-    timeout = 30
-)
-p <- FeaturePlot(
-    integrate.obj,
-    features = c("ubiquitin1", "rbp2", "kinase3"),
-    reduction = "tsne",
-    max.cutoff = "q90",
-    min.cutoff = "q5",
-    cols = c("lightgrey", "darkgreen")
-)
-ggsave(fs::path(WORKDIR, "results", "module-score.pdf"), p, width = 14, height = 14)
+# %% draw RCTD
+drawRCTD <- function() {
+    FLAG <- 1
+    for (idx in idx.full) {
+        if (FLAG) {
+            rctd.results <- read.csv(
+                fs::path(save.dirs[[idx]], paste0(idx, ".rctd.csv")),
+                row.names = 1,
+                header = TRUE
+            )
+            rownames(rctd.results) <- paste(idx, rownames(rctd.results), sep = "_")
+            FLAG <- 0
+        } else {
+            read.results <- read.csv(
+                fs::path(save.dirs[[idx]], paste0(idx, ".rctd.csv")),
+                row.names = 1,
+                header = TRUE
+            )
+            rownames(read.results) <- paste(idx, rownames(read.results), sep = "_")
+            rctd.results <- rbind(rctd.results, read.results)
+        }
+    }
 
-p <- SpatialFeaturePlot(
-    integrate.obj,
-    features = c("ubiquitin1", "rbp2", "kinase3")
-)
-ggsave(fs::path(WORKDIR, "results", "module-score.2.pdf"), p, width = 14, height = 14)
+    rctd.results <- rctd.results[colnames(integrate.obj), ]
+    rctd.results[is.na(rctd.results)] <- 0
+    integrate.obj$Immune <- rctd.results$Immune
+    integrate.obj$NormalBrain <- rctd.results$NormalBrain
+    integrate.obj$Tumor <- rctd.results$Tumour
+    integrate.obj$first_type <- rctd.results$first_type
+    integrate.obj$region <- Idents(integrate.obj)
 
-p <- DotPlot(
-    integrate.obj,
-    features = c("ubiquitin1", "rbp2", "kinase3"),
-    scale = FALSE
-)
-p <- ggplot(p$data, aes(x = id, y = features.plot, fill = avg.exp.scaled)) +
-    geom_tile() +
-    coord_flip() +
-    theme(panel.grid = element_blank(), text = element_text(size = 20)) +
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
-    scale_fill_gsea()
-ggsave(fs::path(WORKDIR, "results", "module-score.hm.pdf"), p, width = 8)
-
-# %%
-include.spots <- c(
-    colnames(subset(integrate.obj, idents = "Normal tissue adjacent to tumor area")),
-    colnames(subset(integrate.obj, idents = "Junction area")),
-    colnames(subset(integrate.obj, idents = "Blood vessel rich area")),
-    colnames(subset(integrate.obj, idents = "GBM Tumor cell densely populated area")),
-    colnames(subset(integrate.obj, idents = "IV Tumor cell densely populated area"))
-)
-draw.obj <- integrate.obj[, include.spots]
-
-p <- pDotPlot(
-    draw.obj,
-    features = c("IDH1", "IDH2")
-)
-ggsave("IDH-dotplot-1.pdf", p)
-
-p <- pDotPlot(
-    integrate.obj,
-    features = c("IDH1", "IDH2"),
-    group.by = "level"
-)
-ggsave("IDH-dotplot-2.pdf", p)
-
-p <- FeaturePlot(
-    integrate.obj,
-    features = c("IDH1", "IDH2"),
-    reduction = "tsne",
-    max.cutoff = "q90",
-    min.cutoff = "0"
-)
-ggsave("IDH-tsne.pdf", p, width = 14)
-
-# %%
-markers.GBMvsIV <- read.csv(
-    fs::path(save.dirs[["int"]], "GBMvsIV", "markers.csv"),
-    header = TRUE,
-    row.names = 1
-) %>% filter(p_val_adj < 0.01, avg_log2FC > 1)
-
-ubis <- loadUbiquitin()
-kinases <- loadKinase()
-rbps <- loadRBP()
-
-tops <- markers.GBMvsIV %>% top_n(300, wt = avg_log2FC)
-ubis <- intersect(ubis, rownames(tops))
-tops <- markers.GBMvsIV %>% top_n(200, wt = avg_log2FC)
-kinases <- intersect(kinases, rownames(tops))
-tops <- markers.GBMvsIV %>% top_n(50, wt = avg_log2FC)
-rbps <- intersect(rbps, rownames(tops))
-
-p <- pDotPlot(
-    integrate.obj,
-    features = c(ubis, rbps, kinases),
-    scale = FALSE,
-    group.by = "level"
-)
-ggsave("1.pdf", p, width = 12)
-
-# %%
-markers.tumor.GBM <- FindMarkers(
-    integrate.obj,
-    ident.1 = "GBM Tumor cell densely populated area",
-    ident.2 = "Normal tissue adjacent to tumor area"
-)
-markers.tumor.IV <- FindMarkers(
-    integrate.obj,
-    ident.1 = "IV Tumor cell densely populated area",
-    ident.2 = "Normal tissue adjacent to tumor area"
-)
-markers.tumor.IV$gene <- rownames(markers.tumor.IV)
-markers.tumor.GBM$gene <- rownames(markers.tumor.GBM)
-
-# %%
-auc.df <- read.csv(
-    fs::path(WORKDIR, "results", "scenic", "full-sct.auc.csv"),
-    header = TRUE,
-    row.names = 1,
-    check.names = FALSE
-) %>% t()
-auc.matrix <- as.matrix(auc.df)
-colnames(auc.matrix) <- colnames(auc.df)
-rownames(auc.matrix) <- rownames(auc.df)
-auc.assay <- CreateAssayObject(data = auc.matrix)
-integrate.obj[["SCENIC"]] <- auc.assay
-
-bin.df <- read.csv(
-    fs::path(WORKDIR, "results", "scenic", "full-sct.bin.csv"),
-    header = TRUE,
-    row.names = 1,
-    check.names = FALSE
-) %>% t()
-bin.matrix <- as.matrix(bin.df)
-colnames(bin.matrix) <- colnames(bin.df)
-rownames(bin.matrix) <- rownames(bin.df)
-bin.assay <- CreateAssayObject(data = bin.matrix)
-integrate.obj[["SCENIC.bin"]] <- bin.assay
-
-all.tfs <- rownames(auc.df) %>% gsub("\\(.*\\)", "", .)
-
-rss.df <- read.csv(
-    fs::path(WORKDIR, "results", "scenic", "full-sct.rss_level.csv"),
-    header = TRUE, row.names = 1, check.names = FALSE
-) %>% t() %>% as.data.frame()
-
-# %%
-tops.gbm <- markers.tumor.GBM %>%
-    filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
-    filter(gene %in% all.tfs) %>%
-    arrange(desc(avg_log2FC)) %>%
-    top_n(n = 100, wt = avg_log2FC) %>%
-    rownames()
-tops.iv <- markers.tumor.IV %>%
-    filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
-    filter(gene %in% all.tfs) %>%
-    arrange(desc(avg_log2FC)) %>%
-    top_n(n = 100, wt = avg_log2FC) %>%
-    rownames()
-
-save.path <- fs::path(WORKDIR, "results", "tfs")
-venn.list <- list("IV" = tops.iv, "GBM" = tops.gbm)
-p <- ggvenn(venn.list)
-ggsave(fs::path(save.path, "venn.pdf"), p)
-overlaps <- gplots::venn(venn.list, show.plot = FALSE)
-overlaps <- attributes(overlaps)$intersections
-capture.output(overlaps, file = fs::path(save.path, "venn.txt"))
-for (int in names(overlaps)) {
     p <- FeaturePlot(
-        integrate.obj, features = overlaps[[int]], ncol = 5, reduction = "tsne")
-    ggsave(
-        fs::path(save.path, paste0(int, "-tsne.pdf")),
-        width = 25,
-        height = ceiling(length(overlaps[[int]]) / 5) * 5,
-        limitsize = FALSE
+        integrate.obj,
+        features = c("NormalBrain", "Tumor", "Immune"),
+        max.cutoff = "q90",
+        ncol = 3,
+        reduction = "tsne"
     )
-    p <- SpatialFeaturePlot(integrate.obj, features = overlaps[[int]], ncol = 4)
-    ggsave(
-        fs::path(save.path, paste0(int, "-spatial.pdf")),
-        width = 20,
-        height = length(overlaps[[int]]) * 5,
-        limitsize = FALSE
+    ggsave(fs::path(WORKDIR, "results", "rctd.tsne.pdf"), width = 21, height = 7)
+
+    p <- RidgePlot(
+        integrate.obj,
+        features = c("NormalBrain", "Tumor", "Immune"),
+        cols = cols,
+        ncol = 3
     )
+    ggsave(fs::path(WORKDIR, "results", "rctd.ridge.pdf"), width = 21, height = 10)
+
+    stack.df <- integrate.obj@meta.data[, c("first_type", "region")]
+    stack.df <- stack.df[stack.df$first_type != 0, ]
+    stack.df$number <- 1
+    stack.df <- plyr::ddply(
+        stack.df, "region", transform, percent = 1 / sum(number) * 100)
+    p <- ggplot(stack.df, aes(region, percent, fill = first_type)) +
+        geom_bar(stat = "identity", position = "stack") +
+        coord_flip() +
+        theme_bw()
+    ggsave(fs::path(WORKDIR, "results", "rctd.stack.pdf"), p)
+}
+drawRCTD()
+
+# %% gene list
+runModuleScore <- function() {
+    gene.list <- list(
+        "ubiquitin" = loadUbiquitin(),
+        "rbp" = loadRBP(),
+        "kinase" = loadKinase()
+    )
+    integrate.obj <- AddModuleScore(
+        integrate.obj,
+        gene.list,
+        assay = "integrated",
+        slot = "data",
+        name = names(gene.list),
+        search = TRUE,
+        verbose = FALSE,
+        timeout = 30
+    )
+    p <- FeaturePlot(
+        integrate.obj,
+        features = c("ubiquitin1", "rbp2", "kinase3"),
+        reduction = "tsne",
+        max.cutoff = "q90",
+        min.cutoff = "q5",
+        cols = c("lightgrey", "darkgreen")
+    )
+    ggsave(
+        fs::path(WORKDIR, "results", "module-score.pdf"),
+        p, width = 14, height = 14
+    )
+
+    p <- SpatialFeaturePlot(
+        integrate.obj,
+        features = c("ubiquitin1", "rbp2", "kinase3")
+    )
+    ggsave(
+        fs::path(WORKDIR, "results", "module-score.2.pdf"),
+        p, width = 14, height = 14
+    )
+
+    p <- DotPlot(
+        integrate.obj,
+        features = c("ubiquitin1", "rbp2", "kinase3"),
+        scale = FALSE
+    )
+    p <- ggplot(p$data, aes(x = id, y = features.plot, fill = avg.exp.scaled)) +
+        geom_tile() +
+        coord_flip() +
+        theme(panel.grid = element_blank(), text = element_text(size = 20)) +
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+        scale_fill_gsea()
+    ggsave(fs::path(WORKDIR, "results", "module-score.hm.pdf"), p, width = 8)
 }
 
-# %%
-tops.gbm <- markers.tumor.GBM %>%
-    filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
-    filter(gene %in% all.tfs) %>%
-    arrange(desc(avg_log2FC)) %>%
-    top_n(n = 100, wt = avg_log2FC) %>%
-    rownames()
-tops.iv <- markers.tumor.IV %>%
-    filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
-    filter(gene %in% all.tfs) %>%
-    arrange(desc(avg_log2FC)) %>%
-    top_n(n = 100, wt = avg_log2FC) %>%
-    rownames()
+# %% tumor vs nat
+differentialExpressionNAT <- function() {
+    markers.tumor.GBM <- FindMarkers(
+        integrate.obj,
+        ident.1 = "GBM Tumor cell densely populated area",
+        ident.2 = "Normal tissue adjacent to tumor area"
+    )
+    markers.tumor.IV <- FindMarkers(
+        integrate.obj,
+        ident.1 = "IV Tumor cell densely populated area",
+        ident.2 = "Normal tissue adjacent to tumor area"
+    )
+    markers.tumor.IV$gene <- rownames(markers.tumor.IV)
+    markers.tumor.GBM$gene <- rownames(markers.tumor.GBM)
 
-rss.df.sub <- rss.df[complete.cases(rss.df), ]
-rownames(rss.df.sub) <- gsub("\\(.*\\)", "", rownames(rss.df.sub))
-rss.df.sub <- rss.df.sub[rownames(rss.df.sub) %in% rownames(markers.tumor.IV), ]
-rss.df.sub <- rss.df.sub[rownames(rss.df.sub) %in% rownames(markers.tumor.GBM), ]
+    save.dir <- fs::path(WORKDIR, "results", "tumor.vs.nat")
+    if (!fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    write.csv(markers.tumor.IV, fs::path(save.dir, "iv.de.csv"))
+    write.csv(markers.tumor.GBM, fs::path(save.dir, "gbm.de.csv"))
 
-tops.gbm.rss <- rss.df.sub %>%
-    arrange(desc(GBM)) %>%
-    top_n(n = 100, wt = GBM) %>%
-    rownames()
-tops.iv.rss <- rss.df.sub %>%
-    arrange(desc(IV)) %>%
-    top_n(n = 100, wt = IV) %>%
-    rownames()
+    return(list(IV = markers.tumor.IV, GBM = markers.tumor.GBM))
+}
+markers.tumor <- differentialExpressionNAT()
 
-tops.iv.list <- list(
-    "TopRSS" = tops.iv.rss,
-    "TopFoldChange" = tops.iv
+# %% tumor vs nat enrichment
+enrichmentFindMarkers(
+    markers.tumor[["IV"]],
+    fs::path(WORKDIR, "results", "tumor.vs.nat", "IV")
 )
-tops.gbm.list <- list(
-    "TopRSS" = tops.gbm.rss,
-    "TopFoldChange" = tops.gbm
+enrichmentFindMarkers(
+    markers.tumor[["GBM"]],
+    fs::path(WORKDIR, "results", "tumor.vs.nat", "GBM")
 )
 
-draw.tops <- function(gene.list, prefix) {
-    gene.list.plus <- paste0(gene.list, "(+)")
-    height <- ceiling(length(gene.list) / 5) * 5
-    auc.obj <- integrate.obj
-    DefaultAssay(auc.obj) <- "SCENIC"
+# %% draw tumor vs nat
+drawTumorNAT <- function() {
+    th <- theme(text = element_text(size = 24))
+    cells <- c(
+        subset(
+            integrate.obj, idents = "GBM Tumor cell densely populated area"
+            ) %>% colnames(),
+        subset(
+            integrate.obj, idents = "IV Tumor cell densely populated area"
+            ) %>% colnames(),
+        subset(
+            integrate.obj, idents = "Normal tissue adjacent to tumor area"
+            ) %>% colnames()
+    )
+
+    genes <- c(
+        "C3", "CCND1", "VIM", "VEGFA",
+        "JUN", "FN1", "SPP1", "FOS"
+    )
     p <- FeaturePlot(
-        auc.obj,
-        features = gene.list.plus,
+        integrate.obj,
+        features = genes,
+        cells = cells,
         reduction = "tsne",
         min.cutoff = 0,
         max.cutoff = "q90",
-        ncol = 5
-    )
-    ggsave(
-        fs::path(WORKDIR, "results", "scenic-plot-1", paste0(prefix, ".auc.pdf")),
-        p,
-        width = 25,
-        height = height,
-        limitsize = FALSE
-    )
+        ncol = 4
+    ) + NoLegend()
+    save.path <- fs::path(WORKDIR, "results", "tumor.vs.nat", "tsne.pdf")
+    ggsave(save.path, p, width = 28, height = 14)
 
-    auc.obj <- integrate.obj
-    DefaultAssay(auc.obj) <- "SCENIC.bin"
-    p <- FeaturePlot(
-        auc.obj,
-        features = gene.list.plus,
-        reduction = "tsne",
-        min.cutoff = 0,
-        max.cutoff = "q90",
-        ncol = 5
-    )
-    ggsave(
-        fs::path(WORKDIR, "results", "scenic-plot-1", paste0(prefix, ".bin.pdf")),
-        p,
-        width = 25,
-        height = height,
-        limitsize = FALSE
-    )
+    p <- ggvolcano(
+        markers.tumor[["IV"]], genes = genes, label_size = 7
+    ) + th + coord_flip()
+    save.path <- fs::path(WORKDIR, "results", "tumor.vs.nat", "iv-volcano.pdf")
+    ggsave(save.path, p, width = 14)
 
-    auc.obj <- integrate.obj
-    DefaultAssay(auc.obj) <- "integrated"
-    p <- FeaturePlot(
-        auc.obj,
-        features = gene.list,
-        reduction = "tsne",
-        min.cutoff = 0,
-        max.cutoff = "q90",
-        ncol = 5
-    )
-    ggsave(
-        fs::path(WORKDIR, "results", "scenic-plot-1", paste0(prefix, ".exp.pdf")),
-        p,
-        width = 25,
-        height = height,
-        limitsize = FALSE
-    )
+    p <- ggvolcano(
+        markers.tumor[["GBM"]], genes = genes, label_size = 7
+    ) + th + coord_flip()
+    save.path <- fs::path(WORKDIR, "results", "tumor.vs.nat", "gbm-volcano.pdf")
+    ggsave(save.path, p, width = 14)
 }
+drawTumorNAT()
 
-overlaps <- gplots::venn(tops.iv.list, show.plot = FALSE)
-overlaps <- attributes(overlaps)$intersections
-for (i in names(overlaps)) {
-    gene.list <- overlaps[[i]]
-    gene.list.plus <- paste0(gene.list, "(+)")
-    prefix <- paste0("IV-", i)
-
-    draw.tops(gene.list, prefix)
-    write.df <- markers.tumor.IV[gene.list, ]
-    write.df$RSS <- rss.df[gene.list.plus, "IV"]
-    write.df[!complete.cases(write.df), "RSS"] <- 0
-    write.csv(
-        write.df,
-        fs::path(WORKDIR, "results", "scenic-plot-1", paste0(prefix, ".csv")),
+# %% gbm vs iv
+differentialExpressionGBMIV <- function() {
+    tops.gbm <- markers.tumor[["GBM"]] %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        filter(pct.1 > pct.2) %>%
+        arrange(desc(avg_log2FC)) %>%
+        rownames()
+    tops.iv <- markers.tumor[["IV"]] %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        filter(pct.1 > pct.2) %>%
+        arrange(desc(avg_log2FC)) %>%
+        rownames()
+    genes <- unique(c(tops.gbm, tops.iv))
+    tops.list <- list(
+        "IDH wildtype" = tops.gbm,
+        "IDH mutant" = tops.iv
     )
+    p <- ggvenn(tops.list, columns = names(tops.list))
+    ggsave(fs::path(WORKDIR, "results", "gbm.vs.iv", "venn.pdf"), p)
+
+    markers <- FindMarkers(
+        integrate.obj[genes, ],
+        ident.1 = "GBM Tumor cell densely populated area",
+        ident.2 = "IV Tumor cell densely populated area"
+    ) %>% arrange(by = p_val_adj)
+
+    g1 <- markers %>%
+        filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
+        arrange(desc(avg_log2FC)) %>%
+        rownames()
+
+    g2 <- markers %>%
+        filter(p_val_adj < 0.05, avg_log2FC < 0) %>%
+        arrange(desc(avg_log2FC)) %>%
+        rownames()
+
+    g3 <- markers %>%
+        filter(p_val_adj > 0.05) %>%
+        arrange(desc(avg_log2FC)) %>%
+        rownames()
+
+    enrichmentGenelist(g1, fs::path(WORKDIR, "results", "gbm.vs.iv", "GBM"), ont = "BP")
+    enrichmentGenelist(g2, fs::path(WORKDIR, "results", "gbm.vs.iv", "IV"), ont = "BP")
+    enrichmentGenelist(g3, fs::path(WORKDIR, "results", "gbm.vs.iv", "ns"), ont = "BP")
+
+    write.xlsx2(
+        markers,
+        fs::path(WORKDIR, "results", "gbm.vs.iv", "markers.xlsx"),
+        sheetName = "ALL"
+    )
+
+    markers %>%
+        filter(avg_log2FC > 0.5, p_val_adj < 0.05) %>%
+        arrange(p_val_adj) %>%
+        write.xlsx2(
+            fs::path(WORKDIR, "results", "gbm.vs.iv", "markers.xlsx"),
+            sheetName = "GBM(FC>0.5)",
+            append = TRUE
+        )
+    markers %>%
+        filter(avg_log2FC < -0.5, p_val_adj < 0.05) %>%
+        arrange(p_val_adj) %>%
+        write.xlsx2(
+            fs::path(WORKDIR, "results", "gbm.vs.iv", "markers.xlsx"),
+            sheetName = "IV(FC<-0.5)",
+            append = TRUE
+        )
+    markers %>%
+        filter(p_val_adj >= 0.05) %>%
+        arrange(p_val_adj) %>%
+        write.xlsx2(
+            fs::path(WORKDIR, "results", "gbm.vs.iv", "markers.xlsx"),
+            sheetName = "ns(p>0.05)",
+            append = TRUE
+        )
 }
+differentialExpressionGBMIV()
 
-overlaps <- gplots::venn(tops.gbm.list, show.plot = FALSE)
-overlaps <- attributes(overlaps)$intersections
-for (i in names(overlaps)) {
-    gene.list <- overlaps[[i]]
-    gene.list.plus <- paste0(gene.list, "(+)")
-    prefix <- paste0("GBM-", i)
+# %% draw gbm vs iv
+drawGBMIV <- function() {
+    FeaturePlotFunction <- function(genes) {
+        FeaturePlot(
+            integrate.obj,
+            features = genes,
+            cells = cells,
+            reduction = "tsne",
+            min.cutoff = 0,
+            max.cutoff = "q90",
+            ncol = 5
+        )
+    }
+    ggsaveFunction <- function(p, save.path) {
+        ggsave(save.path, p, width = 35, height = 42)
+    }
+    markers %>%
+        filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
+        arrange(desc(avg_log2FC)) %>%
+        top_n(n = 30, wt = avg_log2FC) %>%
+        rownames() %>%
+        FeaturePlotFunction() %>%
+        ggsaveFunction(fs::path(WORKDIR, "results", "gbm.vs.iv", "GBMGenes.pdf"))
+    markers %>%
+        filter(p_val_adj < 0.05, avg_log2FC < 0) %>%
+        arrange(avg_log2FC) %>%
+        top_n(n = 30, wt = -avg_log2FC) %>%
+        rownames() %>%
+        FeaturePlotFunction() %>%
+        ggsaveFunction(fs::path(WORKDIR, "results", "gbm.vs.iv", "IVGenes.pdf"))
 
-    draw.tops(gene.list, prefix)
-    write.df <- markers.tumor.GBM[gene.list, ]
-    write.df$RSS <- rss.df[gene.list.plus, "GBM"]
-    write.df[!complete.cases(write.df), "RSS"] <- 0
-    write.csv(
-        write.df,
-        fs::path(WORKDIR, "results", "scenic-plot-1", paste0(prefix, ".csv")),
-    )
+    markers %>%
+        filter(p_val_adj > 0.05) %>%
+        arrange(desc(avg_log2FC)) %>%
+        top_n(n = 30, wt = -abs(avg_log2FC)) %>%
+        rownames() %>%
+        FeaturePlotFunction() %>%
+        ggsaveFunction(fs::path(WORKDIR, "results", "gbm.vs.iv", "NSGenes.pdf"))
+}
+drawGBMIV()
+
+# %% draw enrich
+drawEnrich <- function() {
+    ggenrich <- function(df) {
+        df["Gene Ratio"] <- sapply(
+            df$GeneRatio,
+            function(x) { eval(parse(text = x)) }
+        )
+        df <- arrange(df, `Gene Ratio`)
+        df$Description <- factor(df$Description, levels = df$Description)
+        p <- ggplot(df, aes(x = `Gene Ratio`, y = Description)) +
+            geom_point(aes(size = Count, color = p.adjust)) +
+            theme_bw(base_size = 14) +
+            scale_colour_gradient(limits = c(0, 0.10), low = "red") +
+            ylab(NULL) +
+            ggtitle("KEGG pathway enrichment")
+        return(p)
+    }
+    draw.df <- read.csv("tumor.vs.nat-IV-KEGG.csv")
+    p <- ggenrich(draw.df)
+    ggsave("tumor.vs.nat-IV-KEGG.pdf", p)
+
+    draw.df <- read.csv("tumor.vs.nat-GBM-KEGG.csv")
+    p <- ggenrich(draw.df)
+    ggsave("tumor.vs.nat-GBM-KEGG.pdf", p)
+
+    draw.df <- read.csv("gbm.vs.iv-GBM-GO.csv")
+    p <- ggenrich(draw.df)
+    ggsave("gbm.vs.iv-GBM-GO.pdf", p)
+
+    draw.df <- read.csv("gbm.vs.iv-IV-GO.csv")
+    p <- ggenrich(draw.df)
+    ggsave("gbm.vs.iv-IV-GO.pdf", p)
+
+    draw.df <- read.csv("gbm.vs.iv-ns-GO.csv")
+    p <- ggenrich(draw.df)
+    ggsave("gbm.vs.iv-ns-GO.pdf", p)
 }

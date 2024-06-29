@@ -348,7 +348,7 @@ enrichmentFindMarkers <- function(markers, save.dir, logfc.threshold = 0.5) {
     ggsave(fs::path(save.dir.kegg, "KEGG.pdf"), p1 + p2, width = 14)
 }
 
-enrichmentGenelist <- function(markers, save.dir) {
+enrichmentGenelist <- function(markers, save.dir, ont = "ALL") {
     markers <- markers[!grepl("^DEPRECATED-", markers)]
 
     save.dir.go <- fs::path(save.dir, "GO")
@@ -358,7 +358,7 @@ enrichmentGenelist <- function(markers, save.dir) {
         markers,
         OrgDb = OrgDb,
         keyType = "SYMBOL",
-        ont = "ALL",
+        ont = ont,
         pvalueCutoff = 0.05,
         pAdjustMethod = "BH",
         qvalueCutoff = 0.2
@@ -366,13 +366,13 @@ enrichmentGenelist <- function(markers, save.dir) {
 
     write.csv(as.data.frame(ego), fs::path(save.dir.go, "GO.csv"))
     if (dim(ego)[1] > 1) {
-        if (dim(ego)[1] < 20) {
+        if (dim(ego)[1] < 9) {
             showCategory <- dim(ego)[1]
         } else {
-            showCategory <- 20
+            showCategory <- 9
         }
         p <- dotplot(ego, showCategory = showCategory) + ggtitle("GO Enrichment")
-        ggsave(fs::path(save.dir.go, "GO.pdf"), p, height = 10)
+        ggsave(fs::path(save.dir.go, "GO.pdf"), p, height = 7)
     }
 
     save.dir.kegg <- fs::path(save.dir, "KEGG")
@@ -389,13 +389,13 @@ enrichmentGenelist <- function(markers, save.dir) {
     )
     write.csv(kkMapIds(as.data.frame(kk)), fs::path(save.dir.kegg, "KEGG.csv"))
     if (dim(kk)[1] > 1) {
-        if (dim(kk)[1] < 20) {
+        if (dim(kk)[1] < 9) {
             showCategory <- dim(kk)[1]
         } else {
-            showCategory <- 20
+            showCategory <- 9
         }
         p <- dotplot(kk, showCategory = showCategory) + ggtitle("KEGG Enrichment")
-        ggsave(fs::path(save.dir.kegg, "KEGG.pdf"), p, height = 10)
+        ggsave(fs::path(save.dir.kegg, "KEGG.pdf"), p, height = 7)
     }
 }
 
@@ -435,8 +435,12 @@ DoComplexHeatmap <- function(
 }
 
 ggvolcano <- function(
-    dataset, cut_off_pvalue = 0.01, cut_off_logFC = 0.5, genes = NULL) {
-
+    dataset,
+    cut_off_pvalue = 0.01,
+    cut_off_logFC = 0.5,
+    genes = NULL,
+    label_size = 5
+) {
     dataset$change <- ifelse(
         dataset$p_val_adj < cut_off_pvalue & abs(dataset$avg_log2FC) >= cut_off_logFC,
         ifelse(dataset$avg_log2FC > cut_off_logFC, 'Up', 'Down'),
@@ -444,7 +448,7 @@ ggvolcano <- function(
     )
 
     if (!is.null(genes)) {
-        dataset$label <- ifelse(dataset$Symbol %in% genes, dataset$Symbol, "")
+        dataset$label <- ifelse(dataset$gene %in% genes, dataset$gene, "")
     }
 
     p <- ggplot(dataset, aes(x = avg_log2FC, y = -log10(p_val_adj), color = change)) +
@@ -454,14 +458,14 @@ ggvolcano <- function(
         ylab("-Log10(Adjusted p value)") +
         theme(plot.title = element_text(size = 15, hjust = 0.5)) +
         scale_colour_manual(values = c('steelblue', 'gray', 'brown')) +
-        geom_hline(yintercept = -log10(0.05), lty = 4) +
+        geom_hline(yintercept = -log10(cut_off_pvalue), lty = 4) +
         geom_vline(xintercept = c(-cut_off_logFC, cut_off_logFC), lty = 4)
 
     if (!is.null(genes)) {
-        p <- p + geom_label_repel(
+        p <- p + ggrepel::geom_label_repel(
             data = dataset,
             aes(label = label),
-            size = 3,
+            size = label_size,
             box.padding = unit(0.5, "lines"),
             point.padding = unit(0.8, "lines"),
             segment.color = "black",
