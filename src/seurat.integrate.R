@@ -514,6 +514,87 @@ enrichmentFindMarkers(
     fs::path(WORKDIR, "results", "tumor.vs.nat", "GBM")
 )
 
+# %% draw tumor vs nat enrichment
+drawTumorNATKEGG <- function() {
+    read.path <- fs::path(
+        WORKDIR, "results", "tumor.vs.nat", "IV", "KEGG", "KEGG.xlsx"
+    )
+    iv.enrich <- read.xlsx2(read.path, 1)
+    rownames(iv.enrich) <- iv.enrich$ID
+    iv.enrich <- iv.enrich[, 3:dim(iv.enrich)[2]]
+    iv.enrich$Count <- as.numeric(iv.enrich$Count)
+    read.path <- fs::path(
+        WORKDIR, "results", "tumor.vs.nat", "GBM", "KEGG", "KEGG.xlsx"
+    )
+    gbm.enrich <- read.xlsx2(read.path, 1)
+    rownames(gbm.enrich) <- gbm.enrich$ID
+    gbm.enrich <- gbm.enrich[, 3:dim(gbm.enrich)[2]]
+    gbm.enrich$Count <- as.numeric(gbm.enrich$Count)
+
+    enrich.list <- list(
+        "IV" = rownames(iv.enrich),
+        "GBM" = rownames(gbm.enrich)
+    )
+    overlaps <- gplots::venn(enrich.list, show.plot = FALSE)
+    overlaps <- attributes(overlaps)$intersection
+
+    draw.list <- list(
+        "IDH mutant" = iv.enrich[overlaps[["IV:GBM"]], ] %>% top_n(10, wt = Count),
+        "IDH wildtype" = gbm.enrich[overlaps[["IV:GBM"]], ] %>% top_n(10, wt = Count)
+    )
+    p <- ggenrich2(draw.list, overlap = TRUE) + ggtitle("KEGG Enrichment")
+    ggsave(fs::path(WORKDIR, "results", "tumor.vs.nat", "IV:GBM-common-KEGG.pdf"), p)
+
+    pathways <- c("hsa05166", "hsa04810", "hsa05205", "hsa04015", "hsa05203")
+    draw.list <- list(
+        "IDH mutant" = iv.enrich[pathways, ],
+        "IDH wlidtype" = gbm.enrich[overlaps[["GBM"]], ]
+    )
+    p <- ggenrich2(draw.list, overlap = FALSE) + ggtitle("KEGG Enrichment")
+    ggsave(fs::path(WORKDIR, "results", "tumor.vs.nat", "IV:GBM-iden-KEGG.pdf"), p)
+}
+drawTumorNATKEGG()
+
+# %%
+drawTumorNATGO <- function() {
+    read.path <- fs::path(
+        WORKDIR, "results", "tumor.vs.nat", "IV", "GO", "GO.xlsx"
+    )
+    iv.enrich <- read.xlsx2(read.path, 1) %>% filter(ONTOLOGY == "BP")
+    rownames(iv.enrich) <- iv.enrich$ID
+    iv.enrich <- iv.enrich[, 3:dim(iv.enrich)[2]]
+    iv.enrich$Count <- as.numeric(iv.enrich$Count)
+    read.path <- fs::path(
+        WORKDIR, "results", "tumor.vs.nat", "GBM", "GO", "GO.xlsx"
+    )
+    gbm.enrich <- read.xlsx2(read.path, 1) %>% filter(ONTOLOGY == "BP")
+    rownames(gbm.enrich) <- gbm.enrich$ID
+    gbm.enrich <- gbm.enrich[, 3:dim(gbm.enrich)[2]]
+    gbm.enrich$Count <- as.numeric(gbm.enrich$Count)
+
+    enrich.list <- list(
+        "IV" = rownames(iv.enrich),
+        "GBM" = rownames(gbm.enrich)
+    )
+    overlaps <- gplots::venn(enrich.list, show.plot = FALSE)
+    overlaps <- attributes(overlaps)$intersection
+
+    draw.list <- list(
+        "IDH mutant" = iv.enrich[overlaps[["IV:GBM"]], ] %>% top_n(10, wt = Count),
+        "IDH wildtype" = gbm.enrich[overlaps[["IV:GBM"]], ] %>% top_n(10, wt = Count)
+    )
+    p <- ggenrich2(draw.list, overlap = TRUE) + ggtitle("GO Enrichment")
+    ggsave(fs::path(WORKDIR, "results", "tumor.vs.nat", "IV:GBM-common-GO.pdf"), p)
+
+    draw.list <- list(
+        "IDH mutant" = iv.enrich[overlaps[["IV"]], ] %>% top_n(5, wt = Count),
+        "IDH wlidtype" = gbm.enrich[overlaps[["GBM"]], ] %>% top_n(5, wt = Count)
+    )
+    p <- ggenrich2(draw.list, overlap = FALSE) + ggtitle("GO Enrichment")
+    ggsave(fs::path(WORKDIR, "results", "tumor.vs.nat", "IV:GBM-iden-GO.pdf"), p)
+}
+drawTumorNATGO()
+
 # %% draw tumor vs nat
 drawTumorNAT <- function() {
     th <- theme(text = element_text(size = 24))
@@ -680,21 +761,6 @@ drawGBMIV()
 
 # %% draw enrich
 drawEnrich <- function() {
-    ggenrich <- function(df) {
-        df["Gene Ratio"] <- sapply(
-            df$GeneRatio,
-            function(x) { eval(parse(text = x)) }
-        )
-        df <- arrange(df, `Gene Ratio`)
-        df$Description <- factor(df$Description, levels = df$Description)
-        p <- ggplot(df, aes(x = `Gene Ratio`, y = Description)) +
-            geom_point(aes(size = Count, color = p.adjust)) +
-            theme_bw(base_size = 14) +
-            scale_colour_gradient(limits = c(0, 0.10), low = "red") +
-            ylab(NULL) +
-            ggtitle("KEGG pathway enrichment")
-        return(p)
-    }
     draw.df <- read.csv("tumor.vs.nat-IV-KEGG.csv")
     p <- ggenrich(draw.df)
     ggsave("tumor.vs.nat-IV-KEGG.pdf", p)
@@ -715,3 +781,26 @@ drawEnrich <- function() {
     p <- ggenrich(draw.df)
     ggsave("gbm.vs.iv-ns-GO.pdf", p)
 }
+
+# %%
+vennGBMIV <- function() {
+    tops.gbm <- markers.tumor[["GBM"]] %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        filter(pct.1 > pct.2) %>%
+        arrange(desc(avg_log2FC)) %>%
+        rownames()
+    tops.iv <- markers.tumor[["IV"]] %>%
+        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        filter(pct.1 > pct.2) %>%
+        arrange(desc(avg_log2FC)) %>%
+        rownames()
+    tops.list <- list(
+        "IDH wildtype" = tops.gbm,
+        "IDH mutant" = tops.iv
+    )
+    overlaps <- gplots::venn(tops.list, show.plot = FALSE)
+    overlaps <- attributes(overlaps)$intersection
+    p <- ggvenn(tops.list, columns = names(tops.list))
+    ggsave(fs::path(WORKDIR, "results", "gbm.vs.iv", "venn.pdf"), p)
+}
+vennGBMIV()

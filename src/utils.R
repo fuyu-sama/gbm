@@ -512,3 +512,56 @@ histPlot <- function(object, feature, threshold.df) {
         theme(legend.position = "none")
     return(p)
 }
+
+ggenrich <- function(df) {
+    df["Gene_Ratio"] <- sapply(
+        df$GeneRatio,
+        function(x) { eval(parse(text = x)) }
+    )
+    df$Count <- as.numeric(df$Count)
+    df$p.adjust <- as.numeric(df$p.adjust)
+    df <- arrange(df, `Gene_Ratio`)
+    df$Description <- factor(df$Description, levels = df$Description)
+    p <- ggplot(df, aes(x = Count, y = Description)) +
+        geom_point(aes(size = Gene_Ratio, color = p.adjust)) +
+        theme_bw(base_size = 14) +
+        scale_colour_gradient(limits = c(0, 0.05), low = "red") +
+        ylab(NULL) +
+        ggtitle("KEGG pathway enrichment")
+    return(p)
+}
+
+ggenrich2 <- function(dfs, overlap = TRUE) {
+    overlaps <- gplots::venn(lapply(dfs, rownames), show.plot = FALSE)
+    overlaps <- attributes(overlaps)$intersection
+    overlaps <- overlaps[[length(overlaps)]]
+
+    draw.df <- data.frame()
+    for (df.name in names(dfs)) {
+        df <- dfs[[df.name]]
+        if (overlap) df <- df[overlaps, ]
+        df["Gene_Ratio"] <- sapply(
+            df$GeneRatio,
+            function(x) { eval(parse(text = x)) }
+        )
+        df$Count <- as.numeric(df$Count)
+        df$p.adjust <- as.numeric(df$p.adjust)
+        df <- arrange(df, Count)
+        df$Description <- factor(df$Description, levels = df$Description)
+
+        draw.df.1 <- data.frame(
+            "Description" = df$Description,
+            "Count" = df$Count,
+            "p.adjust" = df$p.adjust,
+            "group" = rep(df.name, dim(df)[1])
+        )
+        draw.df <- rbind(draw.df, draw.df.1)
+    }
+
+    p <- ggplot(draw.df, aes(x = group, y = Description)) +
+        geom_point(aes(size = Count, color = p.adjust)) +
+        theme_bw(base_size = 14) +
+        scale_colour_gradient(limits = c(0, 0.05), low = "red") +
+        ylab(NULL)
+    return(p)
+}
