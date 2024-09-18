@@ -31,7 +31,7 @@ cols <- c(
     "GBM Tumor area 1" = "#D95F02",
     "GBM Tumor area 2" = "#FDBF6F",
     "GBM Tumor area 3" = "#FFFF99",
-    "GBM Tumor area 4" = "#F0027F",
+    "GBM Tumor area 4" = "#CAB2D6",
     "GBM Tumor area 5" = "#BF5B17",
     "GBM Tumor area 6" = "#E6AB02",
     "GBM Tumor area 7" = "#FB9A99",
