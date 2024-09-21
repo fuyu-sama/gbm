@@ -624,19 +624,19 @@ drawTumorNAT <- function() {
         min.cutoff = 0,
         max.cutoff = "q90",
         ncol = 4
-    ) + NoLegend()
+        ) + NoLegend()
     save.path <- fs::path(WORKDIR, "results", "tumor.vs.nat", "tsne.pdf")
     ggsave(save.path, p, width = 28, height = 21)
 
     p <- ggvolcano(
         markers.tumor[["IV"]], genes = genes, label_size = 5
-    ) + th #+ coord_flip()
+        ) + th #+ coord_flip()
     save.path <- fs::path(WORKDIR, "results", "tumor.vs.nat", "iv-volcano.pdf")
     ggsave(save.path, p, width = 7)
 
     p <- ggvolcano(
         markers.tumor[["GBM"]], genes = genes, label_size = 5
-    ) + th #+ coord_flip()
+        ) + th #+ coord_flip()
     save.path <- fs::path(WORKDIR, "results", "tumor.vs.nat", "gbm-volcano.pdf")
     ggsave(save.path, p, width = 7)
 }
@@ -666,127 +666,63 @@ vennGBMIV <- function() {
 vennGBMIV()
 
 # %%
-a <- function() {
-    cells <- c(
-        subset(
-            integrate.obj, idents = "GBM Tumor cell densely populated area"
-            ) %>% colnames(),
-        subset(
-            integrate.obj, idents = "IV Tumor cell densely populated area"
-            ) %>% colnames(),
-        subset(
-            integrate.obj, idents = "Normal tissue adjacent to tumor area"
-            ) %>% colnames()
+differentialExpressionGBMvsIV <- function() {
+    seurat.obj <- integrate.obj
+    names(seurat.obj@images) <- NULL
+    except.spots <- c(
+        colnames(subset(seurat.obj, idents = "Normal tissue adjacent to tumor area")),
+        colnames(subset(seurat.obj, idents = "Junction area")),
+        colnames(subset(seurat.obj, idents = "Blood vessel rich area"))
     )
-    tops.gbm <- markers.tumor[["GBM"]] %>%
-        #filter(p_val_adj < 0.05, avg_log2FC > 5) %>%
-        filter(pct.1 > pct.2) %>%
-        arrange(desc(avg_log2FC))
-    tops.gbm <- tops.gbm[, c("avg_log2FC", "p_val_adj", "gene")]
-    colnames(tops.gbm) <- c("GBM_avg_log2FC", "GBM_p_val_adj", "gene")
-    tops.iv <- markers.tumor[["IV"]] %>%
-        #filter(p_val_adj < 0.05, avg_log2FC > 8) %>%
-        filter(pct.1 > pct.2) %>%
-        arrange(desc(avg_log2FC))
-    tops.iv <- tops.iv[, c("avg_log2FC", "p_val_adj", "gene")]
-    colnames(tops.iv) <- c("IV_avg_log2FC", "IV_p_val_adj", "gene")
-    overlaps <- merge(tops.gbm, tops.iv, all = TRUE, by = "gene")
-    rownames(overlaps) <- overlaps[, "gene"]
-
-    g1 <- overlaps %>%
-        filter(GBM_p_val_adj < 0.05, IV_p_val_adj < 0.05) %>%
-        top_n(100, wt = IV_avg_log2FC) %>%
-        top_n(50, wt = GBM_avg_log2FC) %>%
-        rownames()
-
-    g2 <- overlaps %>%
-        filter(GBM_p_val_adj < 0.05, IV_p_val_adj > 0.05) %>%
-        top_n(50, wt = GBM_avg_log2FC) %>%
-        rownames()
-
-    g3 <- overlaps %>%
-        filter(GBM_p_val_adj > 0.05, IV_p_val_adj < 0.05) %>%
-        top_n(50, wt = IV_avg_log2FC) %>%
-        rownames()
-
-    save.path <- fs::path(WORKDIR, "results", "draw-genes", "IDH wildtype:IDH mutant")
-    if (! fs::dir_exists(save.path)) fs::dir_create(save.path)
-    for (gene in g1) {
-        p <- FeaturePlot(
-            integrate.obj,
-            features = gene,
-            cells = cells,
-            reduction = "tsne",
-            min.cutoff = 0,
-            max.cutoff = "q90"
-        )
-        ggsave(fs::path(save.path, paste0(gene, ".jpg")), p)
-    }
-
-    save.path <- fs::path(WORKDIR, "results", "draw-genes", "IDH wildtype")
-    if (! fs::dir_exists(save.path)) fs::dir_create(save.path)
-    for (gene in g2) {
-        p <- FeaturePlot(
-            integrate.obj,
-            features = gene,
-            cells = cells,
-            reduction = "tsne",
-            min.cutoff = 0,
-            max.cutoff = "q90"
-        )
-        ggsave(fs::path(save.path, paste0(gene, ".jpg")), p)
-    }
-
-    save.path <- fs::path(WORKDIR, "results", "draw-genes", "IDH mutant")
-    if (! fs::dir_exists(save.path)) fs::dir_create(save.path)
-    for (gene in g3) {
-        p <- FeaturePlot(
-            integrate.obj,
-            features = gene,
-            cells = cells,
-            reduction = "tsne",
-            min.cutoff = 0,
-            max.cutoff = "q90"
-        )
-        ggsave(fs::path(save.path, paste0(gene, ".jpg")), p)
-    }
+    all.spots <- colnames(seurat.obj)
+    tumor.spots <- all.spots[! all.spots %in% except.spots]
+    seurat.obj <- seurat.obj[, tumor.spots]
+    markers <- FindMarkers(
+        seurat.obj,
+        min.pct = 0.3,
+        ident.1 = "GBM",
+        ident.2 = "IV",
+        group.by = "level"
+    )
+    save.dir <- fs::path(WORKDIR, "results", "gbm.vs.iv")
+    if (!fs::dir_exists(save.dir)) fs::dir_create(save.dir)
+    write.csv(markers, fs::path(save.dir, "markers.csv"))
+    return(markers)
 }
+markers.GBMvsIV <- differentialExpressionGBMvsIV() %>%
+    filter(p_val_adj < 0.05) %>%
+    filter(pct.1 > 0.3, pct.2 > 0.3)
 
 # %%
-tops.gbm <- markers.tumor[["GBM"]] %>%
-    filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-    filter(pct.1 > pct.2) %>%
-    arrange(desc(avg_log2FC)) %>%
-    rownames()
-tops.iv <- markers.tumor[["IV"]] %>%
-    filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
-    filter(pct.1 > pct.2) %>%
-    arrange(desc(avg_log2FC)) %>%
-    rownames()
-bottoms.gbm <- markers.tumor[["GBM"]] %>%
-    filter(p_val_adj < 0.05, avg_log2FC < -.5) %>%
-    filter(pct.1 < pct.2) %>%
-    arrange(desc(avg_log2FC)) %>%
-    rownames()
-bottoms.iv <- markers.tumor[["IV"]] %>%
-    filter(p_val_adj < 0.05, avg_log2FC < -.5) %>%
-    filter(pct.1 < pct.2) %>%
-    arrange(desc(avg_log2FC)) %>%
-    rownames()
-tops.list <- list(
-    "IDH wildtype up" = tops.gbm,
-    "IDH mutant up" = tops.iv,
-    "IDH wildtype down" = bottoms.gbm,
-    "IDH mutant down" = bottoms.iv
+enrichmentFindMarkers(
+    markers.GBMvsIV,
+    fs::path(WORKDIR, "results", "gbm.vs.iv")
 )
-lapply(tops.list, length)
 
 # %%
-p <- FeaturePlot(
-    integrate.obj,
-    features = c("ALX3", "RFX4", "LTF", "MAFB"),
-    reduction = "tsne",
-    min.cutoff = 0,
-    max.cutoff = "q90"
-)
-ggsave("genes.pdf", width = 14, height = 14)
+drawGBMvsIV <- function() {
+    tops <- top_n(markers.GBMvsIV, n = 100, wt = avg_log2FC) %>% rownames()
+    bottoms <- top_n(markers.GBMvsIV, n = -100, wt = avg_log2FC) %>% rownames()
+    genes <- c(tops, bottoms)
+
+    seurat.obj <- integrate.obj
+    names(seurat.obj@images) <- NULL
+    except.spots <- c(
+        colnames(subset(seurat.obj, idents = "Normal tissue adjacent to tumor area")),
+        colnames(subset(seurat.obj, idents = "Junction area")),
+        colnames(subset(seurat.obj, idents = "Blood vessel rich area"))
+    )
+    all.spots <- colnames(seurat.obj)
+    tumor.spots <- all.spots[! all.spots %in% except.spots]
+    seurat.obj <- seurat.obj[, tumor.spots]
+
+    p <- DoHeatmap(
+        seurat.obj,
+        features = genes,
+        cells = tumor.spots,
+        group.by = "level"
+    )
+    ggsave(fs::path(WORKDIR, "results", "gbm.vs.iv", "heatmap.pdf"), p)
+
+}
+drawGBMvsIV()
