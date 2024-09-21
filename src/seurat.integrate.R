@@ -612,9 +612,9 @@ drawTumorNAT <- function() {
     )
 
     genes <- c(
-        "BCL2A1", "RCAN1", "S100A8", "TYMP",
-        "ABI3BP", "ATP1B4", "MSTN", "PCDH12",
-        "ARHGDIB", "GBE1", "NDUFA4L2", "PLVAP"
+        "SOD2", "UBA52", "S100A6", "CTSB", "PPP1CB",
+        "SMOC1", "APOE", "HIPK2",
+        "SPP1", "IGFBP2", "CALD1", "TMSB4X"
     )
     p <- FeaturePlot(
         integrate.obj,
