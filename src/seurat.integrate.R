@@ -508,11 +508,13 @@ markers.tumor <- differentialExpressionNAT()
 # %% tumor vs nat enrichment
 enrichmentFindMarkers(
     markers.tumor[["IV"]],
-    fs::path(WORKDIR, "results", "tumor.vs.nat", "IV")
+    fs::path(WORKDIR, "results", "tumor.vs.nat", "IV"),
+    logfc.threshold = 1
 )
 enrichmentFindMarkers(
     markers.tumor[["GBM"]],
-    fs::path(WORKDIR, "results", "tumor.vs.nat", "GBM")
+    fs::path(WORKDIR, "results", "tumor.vs.nat", "GBM"),
+    logfc.threshold = 1
 )
 
 # %% draw tumor vs nat enrichment
@@ -546,10 +548,13 @@ drawTumorNATKEGG <- function() {
     p <- ggenrich2(draw.list, overlap = TRUE) + ggtitle("KEGG Enrichment")
     ggsave(fs::path(WORKDIR, "results", "tumor.vs.nat", "IV:GBM-common-KEGG.pdf"), p)
 
-    pathways <- c("hsa05166", "hsa04810", "hsa05205", "hsa04015", "hsa05203")
+    #pathways <- c("hsa05166", "hsa04810", "hsa05205", "hsa04015", "hsa05203")
+    pathways1 <- c("hsa04010", "hsa04530", "hsa04621", "hsa04141", "hsa04630")
+    pathways2 <- c("hsa04926", "hsa05150", "hsa01522", "hsa04979", "hsa05218")
     draw.list <- list(
-        "IDH mutant" = iv.enrich[pathways, ],
-        "IDH wlidtype" = gbm.enrich[overlaps[["GBM"]], ]
+        "IDH mutant" = iv.enrich[pathways1, ],
+        #"IDH wlidtype" = gbm.enrich[overlaps[["GBM"]], ]
+        "IDH wlidtype" = gbm.enrich[pathways2, ]
     )
     p <- ggenrich2(draw.list, overlap = FALSE) + ggtitle("KEGG Enrichment")
     ggsave(fs::path(WORKDIR, "results", "tumor.vs.nat", "IV:GBM-iden-KEGG.pdf"), p)
@@ -590,7 +595,7 @@ drawTumorNATGO <- function() {
         "IDH wlidtype" = gbm.enrich[overlaps[["GBM"]], ] %>% top_n(5, wt = Count)
     )
     p <- ggenrich2(draw.list, overlap = FALSE) + ggtitle("GO Enrichment")
-    ggsave(fs::path(WORKDIR, "results", "tumor.vs.nat", "IV:GBM-iden-GO.pdf"), p)
+    ggsave(fs::path(WORKDIR, "results", "tumor.vs.nat", "IV:GBM-iden-GO.pdf"), p, width = 8)
 }
 
 drawTumorNATKEGG()
@@ -629,28 +634,28 @@ drawTumorNAT <- function() {
     ggsave(save.path, p, width = 28, height = 21)
 
     p <- ggvolcano(
-        markers.tumor[["IV"]], genes = genes, label_size = 5
+        markers.tumor[["IV"]], genes = genes, label_size = 5, cut_off_logFC = 1
         ) + th #+ coord_flip()
     save.path <- fs::path(WORKDIR, "results", "tumor.vs.nat", "iv-volcano.pdf")
     ggsave(save.path, p, width = 7)
 
     p <- ggvolcano(
-        markers.tumor[["GBM"]], genes = genes, label_size = 5
+        markers.tumor[["GBM"]], genes = genes, label_size = 5, cut_off_logFC = 1
         ) + th #+ coord_flip()
     save.path <- fs::path(WORKDIR, "results", "tumor.vs.nat", "gbm-volcano.pdf")
     ggsave(save.path, p, width = 7)
 }
 drawTumorNAT()
 
-# %%
+# %% draw venn diagram
 vennGBMIV <- function() {
     tops.gbm <- markers.tumor[["GBM"]] %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > 1) %>%
         filter(pct.1 > pct.2) %>%
         arrange(desc(avg_log2FC)) %>%
         rownames()
     tops.iv <- markers.tumor[["IV"]] %>%
-        filter(p_val_adj < 0.05, avg_log2FC > .5) %>%
+        filter(p_val_adj < 0.05, avg_log2FC > 1) %>%
         filter(pct.1 > pct.2) %>%
         arrange(desc(avg_log2FC)) %>%
         rownames()
@@ -665,7 +670,7 @@ vennGBMIV <- function() {
 }
 vennGBMIV()
 
-# %%
+# %% gbm vs iv
 differentialExpressionGBMvsIV <- function() {
     seurat.obj <- integrate.obj
     names(seurat.obj@images) <- NULL
@@ -693,36 +698,8 @@ markers.GBMvsIV <- differentialExpressionGBMvsIV() %>%
     filter(p_val_adj < 0.05) %>%
     filter(pct.1 > 0.3, pct.2 > 0.3)
 
-# %%
+# %% enrichment gbm vs iv
 enrichmentFindMarkers(
     markers.GBMvsIV,
     fs::path(WORKDIR, "results", "gbm.vs.iv")
 )
-
-# %%
-drawGBMvsIV <- function() {
-    tops <- top_n(markers.GBMvsIV, n = 100, wt = avg_log2FC) %>% rownames()
-    bottoms <- top_n(markers.GBMvsIV, n = -100, wt = avg_log2FC) %>% rownames()
-    genes <- c(tops, bottoms)
-
-    seurat.obj <- integrate.obj
-    names(seurat.obj@images) <- NULL
-    except.spots <- c(
-        colnames(subset(seurat.obj, idents = "Normal tissue adjacent to tumor area")),
-        colnames(subset(seurat.obj, idents = "Junction area")),
-        colnames(subset(seurat.obj, idents = "Blood vessel rich area"))
-    )
-    all.spots <- colnames(seurat.obj)
-    tumor.spots <- all.spots[! all.spots %in% except.spots]
-    seurat.obj <- seurat.obj[, tumor.spots]
-
-    p <- DoHeatmap(
-        seurat.obj,
-        features = genes,
-        cells = tumor.spots,
-        group.by = "level"
-    )
-    ggsave(fs::path(WORKDIR, "results", "gbm.vs.iv", "heatmap.pdf"), p)
-
-}
-drawGBMvsIV()
