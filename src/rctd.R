@@ -9,7 +9,7 @@ library('spacexr')
 library('ggplot2')
 
 WORKDIR <- fs::path(Sys.getenv("HOME"), "workspace", "gbm")
-source(fs::path(WORKDIR, "src", "R", "utils.R"))
+source(fs::path(WORKDIR, "src", "utils.R"))
 
 # %% read st data
 loadSeuratList()
@@ -58,7 +58,7 @@ runRCTD <- function(idx) {
     rctd.obj <- run.RCTD(rctd.obj, doublet_mode = 'doublet')
     return(rctd.obj)
 }
-rctd.results <- mclapply(idx.list, runRCTD)
+rctd.results <- mclapply(idx.list, runRCTD, mc.cores = 1)
 
 # %%
 for (idx in names(rctd.results)) {

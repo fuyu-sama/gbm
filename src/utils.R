@@ -106,6 +106,26 @@ loadRBP <- function() {
     return(returns)
 }
 
+loadDEPOD <- function() {
+    depod.df <- read.csv(fs::path(WORKDIR, "Data", "depod-2019.txt"))
+    returns <- depod.df$gene
+    return(returns)
+}
+
+updateSymbol <- function(gene.list) {
+    find.genes <- c()
+    for (gene in gene.list) {
+        if (!gene %in% rownames(integrate.obj)) find.genes <- c(find.genes, gene)
+    }
+    #update.genes <- GeneSymbolThesarus(find.genes, verbose = FALSE)
+    update.genes <- try(
+        GeneSymbolThesarus(find.genes, verbose = FALSE)
+    )
+    return.genes <- setdiff(gene.list, find.genes)
+    return.genes <- c(return.genes, unname(update.genes))
+    return(return.genes)
+}
+
 drawGenelist <- function(seurat.obj, gene.list, save.name) {
     idx <- names(seurat.obj@images)
 
@@ -397,6 +417,7 @@ enrichmentGenelist <- function(markers, save.dir, ont = "ALL") {
         p <- dotplot(kk, showCategory = showCategory) + ggtitle("KEGG Enrichment")
         ggsave(fs::path(save.dir.kegg, "KEGG.pdf"), p, height = 7)
     }
+    return(list("ego" = ego, "kk" = kk))
 }
 
 DoComplexHeatmap <- function(
@@ -440,7 +461,7 @@ ggvolcano <- function(
     cut_off_logFC = 0.5,
     genes = NULL,
     label_size = 5
-) {
+    ) {
     dataset$change <- ifelse(
         dataset$p_val_adj < cut_off_pvalue & abs(dataset$avg_log2FC) >= cut_off_logFC,
         ifelse(dataset$avg_log2FC > cut_off_logFC, 'Up', 'Down'),

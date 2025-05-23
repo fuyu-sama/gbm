@@ -433,7 +433,8 @@ runModuleScore <- function() {
     gene.list <- list(
         "ubiquitin" = loadUbiquitin(),
         "rbp" = loadRBP(),
-        "kinase" = loadKinase()
+        "kinase" = loadKinase(),
+        "phosphatase" = loadDEPOD()
     )
     integrate.obj <- AddModuleScore(
         integrate.obj,
@@ -447,7 +448,7 @@ runModuleScore <- function() {
     )
     p <- FeaturePlot(
         integrate.obj,
-        features = c("ubiquitin1", "rbp2", "kinase3"),
+        features = c("ubiquitin1", "rbp2", "kinase3", "phosphatase4"),
         reduction = "tsne",
         max.cutoff = "q90",
         min.cutoff = "q5",
@@ -460,7 +461,7 @@ runModuleScore <- function() {
 
     p <- SpatialFeaturePlot(
         integrate.obj,
-        features = c("ubiquitin1", "rbp2", "kinase3")
+        features = c("ubiquitin1", "rbp2", "kinase3", "phosphatase4")
     )
     ggsave(
         fs::path(WORKDIR, "results", "module-score.2.pdf"),
@@ -469,7 +470,7 @@ runModuleScore <- function() {
 
     p <- DotPlot(
         integrate.obj,
-        features = c("ubiquitin1", "rbp2", "kinase3"),
+        features = c("ubiquitin1", "rbp2", "kinase3", "phosphatase4"),
         scale = FALSE
     )
     p <- ggplot(p$data, aes(x = id, y = features.plot, fill = avg.exp.scaled)) +
@@ -480,6 +481,7 @@ runModuleScore <- function() {
         scale_fill_gsea()
     ggsave(fs::path(WORKDIR, "results", "module-score.hm.pdf"), p, width = 8)
 }
+runModuleScore()
 
 # %% tumor vs nat
 differentialExpressionNAT <- function() {
@@ -703,3 +705,455 @@ enrichmentFindMarkers(
     markers.GBMvsIV,
     fs::path(WORKDIR, "results", "gbm.vs.iv")
 )
+
+# %% rctd 2
+rctd.list <- list()
+for (idx in names(integrate.obj@images)) {
+    results.df <- read.csv(
+        fs::path(save.dirs[[idx]], paste0(idx, ".rctd.2.csv")),
+        header = TRUE,
+        row.names = 1
+    )
+    rownames(results.df) <- paste(idx, results.df$Row.names, sep = "_")
+    rctd.list[[idx]] <- results.df
+}
+rctd.df <- bind_rows(rctd.list)
+rctd.df <- rctd.df[colnames(integrate.obj), ]
+
+integrate.obj$Glioma.1 <- rctd.df$Glioma.1
+integrate.obj$Glioma.2 <- rctd.df$Glioma.2
+integrate.obj$Glioma.3 <- rctd.df$Glioma.3
+integrate.obj$Glioma.4 <- rctd.df$Glioma.4
+integrate.obj$Glioma.5 <- rctd.df$Glioma.5
+integrate.obj$Glioma.6 <- rctd.df$Glioma.6
+integrate.obj$Macrophage <- rctd.df$Macrophage
+integrate.obj$Oligodendrocyte <- rctd.df$Oligodendrocyte
+integrate.obj$T.cells <- rctd.df$T.cells
+celltypes <- c(
+    "Glioma.1", "Glioma.2", "Glioma.3", "Glioma.4", "Glioma.5",
+    "Glioma.6", "Macrophage", "Oligodendrocyte", "T.cells"
+)
+for (celltype in celltypes) {
+    p <- SpatialFeaturePlot(integrate.obj, celltype)
+    ggsave(paste0(celltype, ".rctd.pdf"), p, width = 28, height = 7)
+}
+
+# %% iv sub 1
+integrate.sub <- integrate.obj[, integrate.obj$level == "IV"]
+region.annotations <- list(
+    "Blood vessel rich area" = "Tumor area",
+    "IV Tumor cell densely populated area" = "Tumor area",
+    "IV Tumor area 1" = "Tumor area",
+    "IV Tumor area 2" = "Tumor area",
+    "IV Tumor area 3" = "Tumor area"
+)
+integrate.sub <- RenameIdents(integrate.sub, region.annotations)
+markers.iv <- FindAllMarkers(integrate.sub, min.pct = 0.3)
+
+# %%
+cluster.value <- "Tumor area"
+enrich.genes <- markers.iv %>%
+    filter(cluster == cluster.value) %>%
+    filter(avg_log2FC > 1, p_val_adj < 0.05)
+enrich.list <- enrichmentGenelist(
+    enrich.genes$gene, fs::path(WORKDIR, "results", "250218", cluster.value)
+)
+draw.pathways <- enrich.list$ego@result %>%
+    arrange(desc(Count)) %>%
+    top_n(10)
+p <- dotplot(enrich.list$ego, showCategory = draw.pathways$Description)
+ggsave(fs::path(WORKDIR, "results", "250220", paste0(cluster.value, ".pdf")), p)
+
+cluster.value <- "Normal tissue adjacent to tumor area"
+enrich.genes <- markers.iv %>%
+    filter(cluster == cluster.value) %>%
+    filter(avg_log2FC > 1, p_val_adj < 0.05)
+enrich.list <- enrichmentGenelist(
+    enrich.genes$gene, fs::path(WORKDIR, "results", "250218", cluster.value)
+)
+draw.pathways <- enrich.list$ego@result %>%
+    arrange(desc(Count)) %>%
+    top_n(10)
+p <- dotplot(enrich.list$ego, showCategory = draw.pathways$Description)
+ggsave(fs::path(WORKDIR, "results", "250220", paste0(cluster.value, ".pdf")), p)
+
+cluster.value <- "Junction area"
+enrich.genes <- markers.iv %>%
+    filter(cluster == cluster.value) %>%
+    filter(avg_log2FC > 1, p_val_adj < 0.05)
+enrich.list <- enrichmentGenelist(
+    enrich.genes$gene, fs::path(WORKDIR, "results", "250218", cluster.value)
+)
+draw.pathways <- enrich.list$ego@result %>%
+    arrange(desc(Count)) %>%
+    top_n(10)
+p <- dotplot(enrich.list$ego, showCategory = draw.pathways$Description)
+ggsave(fs::path(WORKDIR, "results", "250220", paste0(cluster.value, ".pdf")), p)
+
+# %% iv sub 2
+integrate.sub.iv <- integrate.obj[, integrate.obj$level == "IV"]
+region.annotations <- list(
+    "IV Tumor cell densely populated area" = "Tumor area",
+    "IV Tumor area 1" = "Tumor area",
+    "IV Tumor area 2" = "Tumor area",
+    "IV Tumor area 3" = "Tumor area"
+)
+integrate.sub.iv <- RenameIdents(integrate.sub.iv, region.annotations)
+integrate.sub.iv.levels <- c(
+    "Blood vessel rich area",
+    "Tumor area",
+    "Junction area",
+    "Normal tissue adjacent to tumor area"
+)
+Idents(integrate.sub.iv) <- factor(
+    Idents(integrate.sub.iv), levels = integrate.sub.iv.levels
+)
+#markers.iv.2 <- FindAllMarkers(integrate.sub.iv, min.pct = 0.3)
+#write.csv(markers.iv.2, "markers.iv.2.csv")
+markers.iv.2 <- read.csv("markers.iv.2.csv", row.names = 1, header = TRUE)
+
+# %%
+markers.iv.2$cluster <- factor(
+    markers.iv.2$cluster, levels = integrate.sub.iv.levels
+)
+tops <- markers.iv.2 %>%
+    filter(!grepl("^MT-", gene)) %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 30) %>%
+    ungroup()
+p <- DoHeatmap(integrate.sub.iv, features = tops$gene) +
+    ggtitle("IDH mutant")
+write.csv(tops, "results/250221/IV热图表格.csv")
+ggsave("results/250221/IV热图.pdf", p, width = 10, height = 10)
+
+# %%
+top30 <- markers.iv.2 %>%
+    filter(cluster == "Junction area") %>%
+    filter(!grepl("^MT-", gene)) %>%
+    arrange(desc(avg_log2FC)) %>%
+    slice_head(n = 30)
+p <- DotPlot(integrate.sub.iv, features = top30$gene) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    ggtitle("IDH mutant")
+ggsave('dotplot.pdf', p, width = 14)
+
+# %%
+markers.iv.2.enrichment <- function(cluster.value) {
+    enrich.genes <- markers.iv.2 %>%
+        filter(cluster == cluster.value) %>%
+        filter(avg_log2FC > 1, p_val_adj < 0.05)
+    enrich.list <- enrichmentGenelist(
+        enrich.genes$gene, fs::path(WORKDIR, "results", "250218", cluster.value)
+    )
+    draw.pathways <- enrich.list$ego@result %>%
+        arrange(desc(Count)) %>%
+        top_n(10)
+    p <- dotplot(enrich.list$ego, showCategory = draw.pathways$Description)
+    ggsave(fs::path(WORKDIR, "results", "250221", paste0(cluster.value, ".pdf")), p)
+}
+markers.iv.2.enrichment("Normal tissue adjacent to tumor area")
+markers.iv.2.enrichment("Tumor area")
+markers.iv.2.enrichment("Junction area")
+
+# %% gbm sub
+integrate.sub.gbm <- integrate.obj[, integrate.obj$level == "GBM"]
+integrate.sub.gbm.levels <- c(
+    "Blood vessel rich area",
+    "GBM Tumor area 2",
+    "GBM Tumor area 3",
+    "GBM Tumor area 6",
+    "GBM Tumor area 7",
+    "GBM Tumor area 8",
+    "GBM Tumor area 1",
+    "GBM Tumor area 4",
+    "GBM Tumor area 5",
+    "GBM Tumor cell densely populated area"
+)
+Idents(integrate.sub.gbm) <- factor(
+    Idents(integrate.sub.gbm), levels = integrate.sub.gbm.levels
+)
+#markers.gbm <- FindAllMarkers(integrate.sub.gbm, min.pct = 0.3)
+#write.csv(markers.gbm, "GBM热图.csv")
+markers.gbm <- read.csv("GBM热图.csv", row.names = 1, header = TRUE)
+
+# %%
+markers.gbm$cluster <- factor(
+    markers.gbm$cluster, levels = integrate.sub.gbm.levels
+)
+tops <- markers.gbm %>%
+    filter(!grepl("^MT-", gene)) %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 30) %>%
+    ungroup()
+p <- DoHeatmap(integrate.sub.gbm, features = tops$gene) +
+    ggtitle("IDH wildtype")
+write.csv(tops, "results/250221/GBM热图表格.csv")
+ggsave("results/250221/GBM热图.pdf", p, width = 14, height = 10)
+
+# %%
+compare.gene <- function(seurat.obj, gene) {
+    draw.data <- GetAssayData(seurat.obj, slot = "data", assay = "integrated")
+    raw.df <- GetAssayData(seurat.obj, slot = "counts", assay = "Spatial")
+    express <- draw.data[gene, raw.df[gene, ] > 0]
+    draw.df <- data.frame(
+        "expression" = express,
+        "region" = Idents(seurat.obj)[names(express)],
+        row.names = names(express)
+    )
+    mean.df <- draw.df %>%
+        group_by(region) %>%
+        summarize(across(everything(), .fns = mean, na.rm = TRUE)) %>%
+        as.data.frame()
+    if (mean.df[1, 2] > mean.df[2, 2]) {
+        if (mean.df[2, 2] > mean.df[3, 2]) {
+            return(gene)
+        }
+    }
+}
+up.genes <- mclapply(
+    unique(markers.iv$gene),
+    function(x) compare.gene(integrate.sub, x),
+    mc.cores = 3
+)
+up.genes <- unlist(up.genes)
+enrich.list <- enrichmentGenelist(
+    up.genes, fs::path(WORKDIR, "results", "250218", "小提琴图基因")
+)
+p <- dotplot(enrich.list$ego, showCategory = draw.pathways$Description)
+ggsave(fs::path(WORKDIR, "results", "250220", "小提琴图基因.pdf"), p)
+
+# %%
+tops <- markers.iv %>%
+    filter(!grepl("^MT-", gene)) %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1) %>%
+    slice_head(n = 30) %>%
+    ungroup()
+p <- DoHeatmap(integrate.sub, features = tops$gene)
+ggsave("热图.pdf", p, width = 10, height = 10)
+
+# %%
+ave.exp <- AverageExpression(integrate.sub)$integrated
+select.genes <- ave.exp[ave.exp[, 1] > ave.exp[, 2], ]
+select.genes <- as.data.frame(
+    select.genes[select.genes[, 2] > select.genes[, 3], ]
+)
+
+select.genes <- filter(select.genes, rownames(select.genes) %in% markers.iv$gene)
+
+# %%
+violin.plot <- function(seurat.obj, gene) {
+    draw.data <- GetAssayData(seurat.obj, slot = "data", assay = "integrated")
+    raw.df <- GetAssayData(seurat.obj, slot = "counts", assay = "Spatial")
+    express <- draw.data[gene, raw.df[gene, ] > 0]
+    draw.df <- data.frame(
+        "expression" = express,
+        "region" = Idents(seurat.obj)[names(express)],
+        row.names = names(express)
+    )
+    mean.df <- draw.df %>%
+        group_by(region) %>%
+        summarize(across(everything(), .fns = mean, na.rm = TRUE)) %>%
+        as.data.frame()
+    if (mean.df[1, 2] > mean.df[2, 2]) {
+        if (mean.df[2, 2] > mean.df[3, 2]) {
+            p <- ggplot(mapping = aes(x = region, y = expression)) +
+                geom_violin(data = draw.df) +
+                geom_line(data = mean.df, group = 1) +
+                geom_point(data = mean.df) +
+                labs(title = gene) +
+                theme_classic() +
+                theme(plot.title = element_text(face = "bold.italic", hjust = 0.5))
+            ggsave(
+                fs::path(WORKDIR, "gene-expression", "violin", paste0(gene, ".pdf")),
+                p
+            )
+        }
+    }
+}
+mclapply(
+    unique(markers.iv$gene),
+    function(x) violin.plot(integrate.sub, x),
+    mc.cores = 5
+)
+
+# %%
+markers <- FindAllMarkers(integrate.obj, min.pct = 0.3)
+write.csv(markers, "markers.csv")
+
+# %%
+gene.list <- list(
+    "ubiquitin" = loadUbiquitin(),
+    "rbp" = loadRBP(),
+    "kinase" = loadKinase(),
+    "phosphatase" = loadDEPOD()
+)
+max_length <- max(sapply(gene.list, length))
+gene.list.filled <- lapply(gene.list, function(x) {
+      c(x, rep(NA, max_length - length(x)))
+})
+gene.df <- as.data.frame(gene.list.filled)
+write.csv(gene.df, "gene_list.csv", row.names = FALSE, na = "", quote = FALSE)
+
+draw.obj.all <- integrate.obj
+region.annotations <- list(
+    "IV Tumor cell densely populated area" = "IDH mutant Tumor cell densely\npopulated area",
+    "GBM Tumor cell densely populated area" = "IDH wildtype Tumor cell densely\npopulated area",
+    "IV Tumor area 1" = "IDH mutant Tumor area 1",
+    "IV Tumor area 2" = "IDH mutant Tumor area 2",
+    "IV Tumor area 3" = "IDH mutant Tumor area 3",
+    "GBM Tumor area 1" = "IDH wildtype Tumor area 1",
+    "GBM Tumor area 2" = "IDH wildtype Tumor area 2",
+    "GBM Tumor area 3" = "IDH wildtype Tumor area 3",
+    "GBM Tumor area 4" = "IDH wildtype Tumor area 4",
+    "GBM Tumor area 5" = "IDH wildtype Tumor area 5",
+    "GBM Tumor area 6" = "IDH wildtype Tumor area 6",
+    "GBM Tumor area 7" = "IDH wildtype Tumor area 7",
+    "GBM Tumor area 8" = "IDH wildtype Tumor area 8",
+    "Normal tissue adjacent to tumor area" = "Normal tissue adjacent\nto tumor area"
+)
+draw.obj.all <- RenameIdents(draw.obj.all, region.annotations)
+markers$cluster_1 <- ifelse(
+    markers$cluster %in% names(region.annotations),
+    region.annotations[markers$cluster],
+    markers$cluster
+)
+
+# %%
+draw.gene.list <- function(genes, level, draw.levels = NULL) {
+    if (level == "IV") {
+        height <- 14
+        width <- 8
+    } else {
+        height <- 16
+        width <- 12
+    }
+    save.path <- fs::path(
+        WORKDIR,
+        "results",
+        "250307",
+        paste(level, genes, "pdf", sep = ".")
+    )
+    draw.obj <- draw.obj.all[, draw.obj.all$level == level]
+    if (is.null(draw.levels)) {
+        draw.levels <- levels(draw.obj)
+    } else {
+        draw.levels <- c(
+            draw.levels,
+            levels(draw.obj)[!levels(draw.obj) %in% draw.levels]
+        )
+    }
+    Idents(draw.obj) <- factor(Idents(draw.obj), levels = draw.levels)
+    genes <- markers %>%
+        mutate(cluster_1 = factor(cluster_1, levels = draw.levels)) %>%
+        filter(p_val_adj < 0.05, gene %in% gene.list[[genes]]) %>%
+        group_by(cluster_1) %>%
+        arrange(desc(avg_log2FC)) %>%
+        slice_head(n = 10)
+    p <- DoHeatmap(draw.obj, genes$gene)
+    ggsave(save.path, p, width = width, height = height)
+}
+
+draw.levels <- c(
+    "Normal tissue adjacent\nto tumor area",
+    "Blood vessel rich area"
+)
+draw.gene.list(genes = "kinase", level = "IV", draw.levels = draw.levels)
+
+draw.levels <- c(
+    "IDH wildtype Tumor area 2",
+    "IDH wildtype Tumor area 3",
+    "IDH wildtype Tumor area 4",
+    "IDH wildtype Tumor area 6",
+    "IDH wildtype Tumor area 7",
+    "IDH wildtype Tumor area 8",
+    "Blood vessel rich area"
+)
+draw.gene.list(genes = "kinase", level = "GBM", draw.levels = draw.levels)
+
+draw.levels <- c(
+    "Normal tissue adjacent\nto tumor area",
+    "Blood vessel rich area"
+)
+draw.gene.list(genes = "phosphatase", level = "IV", draw.levels = draw.levels)
+
+draw.levels <- c(
+    "IDH wildtype Tumor area 2",
+    "IDH wildtype Tumor area 3",
+    "IDH wildtype Tumor area 4",
+    "IDH wildtype Tumor area 6",
+    "IDH wildtype Tumor area 7",
+    "IDH wildtype Tumor area 8",
+    "Blood vessel rich area"
+)
+draw.gene.list(genes = "phosphatase", level = "GBM", draw.levels = draw.levels)
+
+draw.levels <- c(
+    "Normal tissue adjacent\nto tumor area",
+    "Blood vessel rich area",
+    "IDH mutant Tumor cell densely\npopulated area"
+)
+draw.gene.list(genes = "rbp", level = "IV", draw.levels = draw.levels)
+
+draw.levels <- c(
+    "IDH wildtype Tumor area 2",
+    "IDH wildtype Tumor area 3",
+    "IDH wildtype Tumor area 6",
+    "IDH wildtype Tumor area 7",
+    "IDH wildtype Tumor area 8",
+    "Blood vessel rich area"
+)
+draw.gene.list(genes = "rbp", level = "GBM", draw.levels = draw.levels)
+
+draw.levels <- c(
+    "Normal tissue adjacent\nto tumor area",
+    "Blood vessel rich area",
+    "IDH mutant Tumor cell densely\npopulated area"
+)
+draw.gene.list(genes = "ubiquitin", level = "IV", draw.levels = draw.levels)
+
+draw.levels <- c(
+    "IDH wildtype Tumor area 6",
+    "IDH wildtype Tumor area 7",
+    "IDH wildtype Tumor area 8",
+    "Blood vessel rich area"
+)
+draw.gene.list(genes = "ubiquitin", level = "GBM", draw.levels = draw.levels)
+
+# %%
+gene <- "MSTN"
+p <- FeaturePlot(
+    integrate.obj,
+    features = gene,
+    reduction = "tsne",
+    min.cutoff = 0,
+    max.cutoff = "q90",
+    ) + NoLegend()
+ggsave(paste0(gene, "-tsne.pdf"), p)
+
+draw.obj <- integrate.obj
+DefaultAssay(draw.obj) <- "Spatial"
+p <- SpatialFeaturePlot(
+    draw.obj,
+    features = gene,
+    slot = "count",
+    min.cutoff = 0,
+    max.cutoff = "q95"
+)
+ggsave(paste0(gene, "-spatial.pdf"), p, width = 28)
+
+# %%
+p <- DotPlot(
+    integrate.obj,
+    features = c("kinase3", "phosphatase4", "ubiquitin1", "rbp2"),
+    scale = FALSE
+)
+p <- ggplot(p$data, aes(x = features.plot, y = id, fill = avg.exp.scaled)) +
+    geom_tile() +
+    coord_flip() +
+    theme(panel.grid = element_blank(), text = element_text(size = 20)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    scale_fill_gsea()
+ggsave(fs::path(WORKDIR, "results", "module-score.hm.pdf"), p, width = 9, height = 5)
